@@ -139,6 +139,7 @@ const struct option *gamescope_options = (struct option[]){
 	{ "force-composition-rotation", no_argument, nullptr, 0 },
 	{ "force-orientation", required_argument, nullptr, 0 },
 	{ "force-windows-fullscreen", no_argument, nullptr, 0 },
+	{ "custom-refresh-rates", required_argument, nullptr, 0 },
 
 	{ "disable-color-management", no_argument, nullptr, 0 },
 	{ "sdr-gamut-wideness", required_argument, nullptr, 0 },
@@ -221,6 +222,7 @@ const char usage[] =
 	"  --hdr-itm-target-nits          set the target luminace of the inverse tone mapping process.\n"
 	"                                 Default: 1000 nits, Max: 10000 nits\n"
 	"  --framerate-limit              Set a simple framerate limit. Used as a divisor of the refresh rate, rounds down eg 60 / 59 -> 60fps, 60 / 25 -> 30fps. Default: 0, disabled.\n"
+	"  --custom-refresh-rates         Set custom refresh rates for the output. eg: 60,90,110-120\n"
 	"  --mangoapp                     Launch with the mangoapp (mangohud) performance overlay enabled. You should use this instead of using mangohud on the game or gamescope.\n"
 	"  --adaptive-sync                Enable adaptive sync if available (variable rate refresh)\n"
 	"\n"
@@ -514,6 +516,33 @@ static float parse_float(const char *str, const char *optionName)
 		fprintf( stderr, "gamescope: invalid value for --%s, \"%s\" could not be interpreted as a real number\n", optionName, str );
 		exit(1);
 	}
+}
+
+std::vector<uint32_t> g_customRefreshRates;
+// eg: 60,60,90,110-120
+static std::vector<uint32_t> parse_custom_refresh_rates( const char *str )
+{
+	std::vector<uint32_t> rates;
+	char *token = strtok( strdup(str), ",");
+	while (token)
+	{
+		char *dash = strchr(token, '-');
+		if (dash)
+		{
+			uint32_t start = atoi(token);
+			uint32_t end = atoi(dash + 1);
+			for (uint32_t i = start; i <= end; i++)
+			{
+				rates.push_back(i);
+			}
+		}
+		else
+		{
+			rates.push_back(atoi(token));
+		}
+		token = strtok(nullptr, ",");
+	}
+	return rates;
 }
 
 struct sigaction handle_signal_action = {};
@@ -844,6 +873,8 @@ int main(int argc, char **argv)
 					g_bForceCompositionRotation = true;
 				} else if (strcmp(opt_name, "force-orientation") == 0) {
 					g_DesiredInternalOrientation = force_orientation( optarg );
+				} else if (strcmp(opt_name, "custom-refresh-rates") == 0) {
+					g_customRefreshRates = parse_custom_refresh_rates( optarg );
 				} else if (strcmp(opt_name, "sharpness") == 0 ||
 						   strcmp(opt_name, "fsr-sharpness") == 0) {
 					g_upscaleFilterSharpness = parse_integer( optarg, opt_name );
