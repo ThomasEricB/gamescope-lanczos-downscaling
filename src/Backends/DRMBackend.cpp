@@ -2378,7 +2378,9 @@ namespace gamescope
 				sol::optional<sol::table> otDynamicRefreshRates = tTable["dynamic_refresh_rates"];
 				sol::optional<sol::function> ofnDynamicModegen = tTable["dynamic_modegen"];
 
-				if ( otDynamicRefreshRates && ofnDynamicModegen )
+				if ( otDynamicRefreshRates && !ofnDynamicModegen )
+					m_Mutable.ValidDynamicRefreshRates = TableToVector<uint32_t>( *otDynamicRefreshRates );
+				else if ( otDynamicRefreshRates && ofnDynamicModegen )
 				{
 					m_Mutable.ValidDynamicRefreshRates = TableToVector<uint32_t>( *otDynamicRefreshRates );
 
