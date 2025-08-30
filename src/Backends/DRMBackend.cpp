@@ -3670,6 +3670,17 @@ namespace gamescope
 			bNeedsFullComposite |= pFrameInfo->bFadingOut;
 			bNeedsFullComposite |= !g_reshade_effect.empty();
 
+			if ( !SupportsColorManagement() ) {
+				// Fuzzy match default values to see if we need to composite
+				bNeedsFullComposite |= g_ColorMgmt.pending.nightmode.amount != 0.0f;
+				bNeedsFullComposite |= g_ColorMgmt.pending.outputVirtualWhite.x > 0 &&
+					abs(g_ColorMgmt.pending.outputVirtualWhite.x - 0.3127f) > 0.001f;
+				bNeedsFullComposite |= g_ColorMgmt.pending.outputVirtualWhite.y > 0 &&
+					abs(g_ColorMgmt.pending.outputVirtualWhite.y - 0.3290f) > 0.001f;
+				bNeedsFullComposite |= g_ColorMgmt.pending.sdrGamutWideness >= 0 &&
+					abs(g_ColorMgmt.pending.sdrGamutWideness - 0.5f) > 0.02f;
+			}
+
 			if ( g_bOutputHDREnabled )
 			{
 				bNeedsFullComposite |= g_bHDRItmEnable;
