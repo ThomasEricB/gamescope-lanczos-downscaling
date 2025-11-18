@@ -722,12 +722,11 @@ static uint32_t pick_plane_format( const struct wlr_drm_format_set *formats, uin
 /* Pick a primary plane that can be connected to the chosen CRTC. */
 static gamescope::CDRMPlane *find_primary_plane(struct drm_t *drm)
 {
-	if ( !drm->pCRTC )
-		return nullptr;
-
 	for ( std::unique_ptr< gamescope::CDRMPlane > &pPlane : drm->planes )
 	{
-		if ( pPlane->GetModePlane()->possible_crtcs & drm->pCRTC->GetCRTCMask() )
+		// Use a plane that can be used with the current CRTC. If no CRTC is
+		// chosen yet, pick any primary plane.
+		if ( !drm->pCRTC || (pPlane->GetModePlane()->possible_crtcs & drm->pCRTC->GetCRTCMask()) )
 		{
 			if ( pPlane->GetProperties().type->GetCurrentValue() == DRM_PLANE_TYPE_PRIMARY )
 				return pPlane.get();
