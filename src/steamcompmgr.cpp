@@ -4219,6 +4219,35 @@ static void set_wm_state( xwayland_ctx_t *ctx, Window win, uint32_t state )
 				sizeof(wmState) / sizeof(wmState[0]));
 }
 
+static void set_net_wm_state( xwayland_ctx_t *ctx, steamcompmgr_win_t *w )
+{
+	Atom netWmState[4];
+	int count = 0;
+
+	if ( w->isFullscreen )
+	{
+		netWmState[count++] = ctx->atoms.netWMStateFullscreenAtom;
+	}
+
+	if ( w->skipTaskbar )
+	{
+		netWmState[count++] = ctx->atoms.netWMStateSkipTaskbarAtom;
+	}
+
+	if ( w->skipPager )
+	{
+		netWmState[count++] = ctx->atoms.netWMStateSkipPagerAtom;
+	}
+
+	if ( ctx->focus.focusWindow == w )
+	{
+		netWmState[count++] = ctx->atoms.netWMStateFocusedAtom;
+	}
+
+	XChangeProperty( ctx->dpy, w->xwayland().id, ctx->atoms.netWMStateAtom, XA_ATOM, 32,
+				PropModeReplace, (unsigned char *)netWmState, count );
+}
+
 static void set_net_active_window( xwayland_ctx_t *ctx, Window win )
 {
 	ctx->netActiveWindow = win;
@@ -4307,6 +4336,12 @@ void xwayland_ctx_t::DetermineAndApplyFocus( const std::vector< steamcompmgr_win
 			/* Some games (e.g. DOOM Eternal) don't react well to being put back as
 			* iconic, so never do that. Only take them out of iconic. */
 			set_wm_state( ctx, id, ICCCM_NORMAL_STATE );
+
+			if ( prevFocusWindow )
+			{
+				set_net_wm_state( ctx, prevFocusWindow );
+			}
+			set_net_wm_state( ctx, ctx->focus.focusWindow );
 
 			gpuvis_trace_printf( "determine_and_apply_focus focus %lu", id );
 
@@ -6055,12 +6090,15 @@ handle_net_wm_state(xwayland_ctx_t *ctx, steamcompmgr_win_t *w, XClientMessageEv
 			update_net_wm_state(action, &w->isFullscreen);
 			fullscreenChanged |= w->isFullscreen != wasFullscreen;
 			MakeFocusDirty();
+			set_net_wm_state(ctx, w);
 		} else if (props[i] == ctx->atoms.netWMStateSkipTaskbarAtom) {
 			update_net_wm_state(action, &w->skipTaskbar);
 			MakeFocusDirty();
+			set_net_wm_state(ctx, w);
 		} else if (props[i] == ctx->atoms.netWMStateSkipPagerAtom) {
 			update_net_wm_state(action, &w->skipPager);
 			MakeFocusDirty();
+			set_net_wm_state(ctx, w);
 		} else if (props[i] != None) {
 			xwm_log.debugf("Unhandled NET_WM_STATE property change: %s", XGetAtomName(ctx->dpy, props[i]));
 		}
