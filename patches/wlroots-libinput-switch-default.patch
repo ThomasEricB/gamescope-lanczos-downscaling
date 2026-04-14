@@ -1,0 +1,33 @@
+Subject: [PATCH] backend/libinput: add default case to switch-type switch
+
+Current Arch / recent toolchains build wlroots with `-Werror=switch` (or
+effectively that via distro CFLAGS), and libinput's `enum libinput_switch`
+is not exhaustively covered by the switch statement in
+`handle_switch_toggle` — only `LIBINPUT_SWITCH_LID` and
+`LIBINPUT_SWITCH_TABLET_MODE` are handled.
+
+If a newer libinput introduces an additional enum value, or the compiler
+is strict about this, the build fails at
+`subprojects/wlroots/libwlroots-0.18.a.p/backend_libinput_switch.c.o`.
+
+Add a trivial `default: return;` so unknown switch types are silently
+ignored instead of producing a compile error. This matches the
+behaviour we already want — we genuinely cannot synthesise a
+`wlr_switch_toggle_event` for a switch type wlroots has no mapping for.
+
+Applies cleanly to Valve's wlroots-gamescope branch at 0.18-gamescope5.
+
+---
+diff --git a/backend/libinput/switch.c b/backend/libinput/switch.c
+index abeec86d..51fb5da8 100644
+--- a/backend/libinput/switch.c
++++ b/backend/libinput/switch.c
+@@ -36,6 +36,8 @@ void handle_switch_toggle(struct libinput_event *event,
+ 	case LIBINPUT_SWITCH_TABLET_MODE:
+ 		wlr_event.switch_type = WLR_SWITCH_TYPE_TABLET_MODE;
+ 		break;
++	default:
++		return;
+ 	}
+ 	switch (libinput_event_switch_get_switch_state(sevent)) {
+ 	case LIBINPUT_SWITCH_STATE_OFF:

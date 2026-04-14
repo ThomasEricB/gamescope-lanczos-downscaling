@@ -55,8 +55,14 @@ Rationale: the Lanczos / bilateral / hdeband math itself is public-domain signal
 
 ## Building
 
-```
-git submodule update --init
+```sh
+git submodule update --init --recursive
+
+# Apply the wlroots libinput compile fix (needed on recent Arch / newer
+# libinput; safe to re-run — no-op once already applied).
+git -C subprojects/wlroots apply --check ../../patches/wlroots-libinput-switch-default.patch \
+    && git -C subprojects/wlroots apply ../../patches/wlroots-libinput-switch-default.patch
+
 meson setup build/
 ninja -C build/
 build/src/gamescope -- <game>
