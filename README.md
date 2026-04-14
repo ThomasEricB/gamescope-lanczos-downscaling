@@ -138,7 +138,3 @@ Using Reshade effects is **highly discouraged** for doing simple transformations
 The looks system where you can specify your own 3D LUTs would be a better alternative for such transformations.
 
 Pull requests for improving Reshade compatibility support are appreciated.
-
-## Status of Gamescope Packages
-
-[![Packaging status](https://repology.org/badge/vertical-allrepos/gamescope.svg?exclude_unsupported=1)](https://repology.org/project/gamescope/versions)
