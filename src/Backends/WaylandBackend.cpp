@@ -1716,7 +1716,8 @@ namespace gamescope
         int32_t uScale = GetScale();
 
         int nWidth, nHeight;
-        if ( !libdecor_configuration_get_content_size( pConfiguration, m_pFrame, &nWidth, &nHeight ) )
+        bool bHasContentSize = libdecor_configuration_get_content_size( pConfiguration, m_pFrame, &nWidth, &nHeight );
+        if ( !bHasContentSize )
         {
             // XXX(virtual connector): Move g_nOutputWidth etc to connector.
             // Right now we are doubling this up when we should not be.
@@ -1725,6 +1726,24 @@ namespace gamescope
             nWidth  = WaylandScaleToLogical( g_nOutputWidth, uScale );
             nHeight = WaylandScaleToLogical( g_nOutputHeight, uScale );
         }
+
+        // If the user explicitly specified -W/-H, don't let the compositor
+        // shrink the output below the requested size. This works around KDE
+        // moving/resizing gamescope to a smaller virtual output (e.g. an XDP
+        // screen-sharing output) instead of the physical monitor.
+        if ( bHasContentSize && g_nPreferredOutputWidth > 0 && g_nPreferredOutputHeight > 0 )
+        {
+            int nPreferredLogicalW = WaylandScaleToLogical( g_nPreferredOutputWidth, uScale );
+            int nPreferredLogicalH = WaylandScaleToLogical( g_nPreferredOutputHeight, uScale );
+            if ( nWidth < nPreferredLogicalW || nHeight < nPreferredLogicalH )
+            {
+                xdg_log.infof( "Configure: compositor suggested %dx%d but preferred is %dx%d, keeping preferred",
+                    nWidth, nHeight, nPreferredLogicalW, nPreferredLogicalH );
+                nWidth  = nPreferredLogicalW;
+                nHeight = nPreferredLogicalH;
+            }
+        }
+
         g_nOutputWidth  = WaylandScaleToPhysical( nWidth, uScale );
         g_nOutputHeight = WaylandScaleToPhysical( nHeight, uScale );
 
