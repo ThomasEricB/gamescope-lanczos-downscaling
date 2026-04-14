@@ -1,6 +1,6 @@
 ## About this gamescope fork: gamescope-lanczos-downscaling
 
-Gamescope is the the micro-compositor formerly known as steamcompmgr. This fork adds a high-quality Linux-side "supersampling" path intended for use cases like running a 4K (or higher) internal render target on a 1080p / 1440p display. I made this for myself and partially for Ross Scott from Accursed Farms. Supersampling is the way to go!
+Gamescope is the the micro-compositor formerly known as steamcompmgr. This fork adds a high-quality Linux-side "supersampling" path intended for use cases like running a game internally in 4k on a 1080p / 1440p display. I made this for myself and partially for Ross Scott from Accursed Farms. Supersampling is the way to go!
 
 Compared to the FSR/NIS/Bicubic upscalers that upstream gamescope ships, these are **downscalers** and post-process passes — they are intended to run on frames whose internal resolution is *larger* than the output. And yes, you can't downscale using FSR on normal gamescope. Normal gamescope is wired to only use FSR to upscale. If you want to use FSR as a downscaler, consider patching: https://github.com/ValveSoftware/gamescope/pull/702. 
 
