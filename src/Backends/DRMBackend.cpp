@@ -4148,6 +4148,15 @@ namespace gamescope
 			gpuvis_trace_printf( "flip commit %" PRIu64, (uint64_t)GetCurrentConnector()->PresentationFeedback().m_uQueuedPresents );
 
 			ret = drmModeAtomicCommit(drm->fd, drm->req, drm->flags, &m_PresentCtxs[uCurrentPresentCtx] );
+
+			// A layout change can't be an async flip on some drivers (amdgpu
+			// returns -EINVAL); liftoff already validated it, so retry blocking.
+			if ( ret == -EINVAL && ( drm->flags & DRM_MODE_PAGE_FLIP_ASYNC ) )
+			{
+				drm->flags &= ~(uint32_t)DRM_MODE_PAGE_FLIP_ASYNC;
+				ret = drmModeAtomicCommit(drm->fd, drm->req, drm->flags, &m_PresentCtxs[uCurrentPresentCtx] );
+			}
+
 			if ( ret != 0 )
 			{
 				drm_log.errorf_errno( "flip error" );
