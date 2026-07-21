@@ -170,6 +170,15 @@ struct wlserver_t {
 	bool button_held[ WLSERVER_BUTTON_COUNT ];
 	std::set <uint32_t> touch_down_ids;
 
+	struct touch_point_data {
+		struct wlr_surface *surface = nullptr;
+		double sub_x = 0.0;
+		double sub_y = 0.0;
+		double base_root_x = 0.0;
+		double base_root_y = 0.0;
+	};
+	std::unordered_map<int, touch_point_data> touch_points;
+
 	struct {
 		char *name;
 		char *description;

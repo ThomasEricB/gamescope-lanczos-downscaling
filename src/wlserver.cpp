@@ -2621,6 +2621,20 @@ static std::pair<int, int> wlserver_get_cursor_bounds()
 	return std::make_pair( nWidth, nHeight );
 }
 
+static struct wlr_surface *resolve_surface_at(
+	struct wlr_surface *surface, double &sx, double &sy)
+{
+	double sub_x, sub_y;
+	struct wlr_surface *sub = wlr_surface_surface_at( surface, sx, sy, &sub_x, &sub_y );
+	if ( sub )
+	{
+		sx = sub_x;
+		sy = sub_y;
+		return sub;
+	}
+	return surface;
+}
+
 static void wlserver_clampcursor()
 {
 	auto [nWidth, nHeight] = wlserver_get_cursor_bounds();
@@ -2631,6 +2645,11 @@ static void wlserver_clampcursor()
 void wlserver_mousefocus( struct wlr_surface *wlrsurface, int x /* = 0 */, int y /* = 0 */ )
 {
 	assert( wlserver_is_lock_held() );
+
+	double dbl_x = x, dbl_y = y;
+	wlrsurface = resolve_surface_at( wlrsurface, dbl_x, dbl_y );
+	x = (int)dbl_x;
+	y = (int)dbl_y;
 
 	if ( wlserver.mouse_focus_surface == wlrsurface )
 	{
@@ -3049,6 +3068,14 @@ void wlserver_touchmotion( double x, double y, int touch_id, uint32_t time, bool
 		tx = clamp( tx, 0.0, nWidth - 0.1 );
 		ty = clamp( ty, 0.0, nHeight - 0.1 );
 
+		if ( wlserver.mouse_focus_surface )
+		{
+			double hit_x = tx, hit_y = ty;
+			resolve_surface_at( wlserver.mouse_focus_surface, hit_x, hit_y );
+			tx = hit_x;
+			ty = hit_y;
+		}
+
 		double trackpad_dx, trackpad_dy;
 
 		trackpad_dx = tx - wlserver.mouse_surface_cursorx;
@@ -3058,7 +3085,17 @@ void wlserver_touchmotion( double x, double y, int touch_id, uint32_t time, bool
 
 		if ( eMode == gamescope::TouchClickModes::Passthrough )
 		{
-			wlr_seat_touch_notify_motion( wlserver.wlr.seat, time, touch_id, tx, ty );
+			auto tp = wlserver.touch_points.find( touch_id );
+			if ( tp != wlserver.touch_points.end() )
+			{
+				double sub_x = tp->second.sub_x + ( tx - tp->second.base_root_x );
+				double sub_y = tp->second.sub_y + ( ty - tp->second.base_root_y );
+				wlr_seat_touch_notify_motion( wlserver.wlr.seat, time, touch_id, sub_x, sub_y );
+			}
+			else
+			{
+				wlr_seat_touch_notify_motion( wlserver.wlr.seat, time, touch_id, tx, ty );
+			}
 
 			if ( bAlwaysWarpCursor )
 				wlserver_mousewarp( tx, ty, time, false );
@@ -3103,12 +3140,26 @@ void wlserver_touchdown( double x, double y, int touch_id, uint32_t time, gamesc
 		tx *= focusedWindowScaleX;
 		ty *= focusedWindowScaleY;
 
+		double root_tx = tx, root_ty = ty;
+		double sub_x = tx, sub_y = ty;
+		struct wlr_surface *surf = wlserver.mouse_focus_surface;
+		if ( surf )
+			resolve_surface_at( surf, sub_x, sub_y );
+
 		gamescope::TouchClickMode eMode = GetBackend()->GetTouchClickMode();
 
 		if ( eMode == gamescope::TouchClickModes::Passthrough )
 		{
-			wlr_seat_touch_notify_down( wlserver.wlr.seat, wlserver.mouse_focus_surface, time, touch_id,
-										tx, ty );
+			wlserver.touch_points[ touch_id ] = wlserver_t::touch_point_data{
+				.surface = surf,
+				.sub_x = sub_x,
+				.sub_y = sub_y,
+				.base_root_x = root_tx,
+				.base_root_y = root_ty,
+			};
+
+			wlr_seat_touch_notify_down( wlserver.wlr.seat, surf, time, touch_id,
+										sub_x, sub_y );
 
 			wlserver.touch_down_ids.insert( touch_id );
 		}
@@ -3122,7 +3173,7 @@ void wlserver_touchdown( double x, double y, int touch_id, uint32_t time, gamesc
 
 			if ( eMode != gamescope::TouchClickModes::Trackpad )
 			{
-				wlserver_mousewarp( tx, ty, time, false );
+				wlserver_mousewarp( sub_x, sub_y, time, false );
 			}
 
 			uint32_t button = TouchClickModeToLinuxButton( eMode );
@@ -3173,6 +3224,8 @@ void wlserver_touchup( int touch_id, uint32_t time )
 			wlr_seat_touch_notify_up( wlserver.wlr.seat, time, touch_id );
 			wlserver.touch_down_ids.erase( touch_id );
 		}
+
+		wlserver.touch_points.erase( touch_id );
 	}
 
 	bump_input_counter();
