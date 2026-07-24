@@ -9794,9 +9794,6 @@ steamcompmgr_main(int argc, char **argv)
 		if ( !hasRepaintNonBasePlane )
 			nIgnoredOverlayRepaints = 0;
 
-		if ( cv_adaptive_sync_ignore_overlay )
-			nIgnoredOverlayRepaints = 0;
-
 		for ( auto &iter : g_VirtualConnectorFocuses )
 		{
 			global_focus_t *pPaintFocus = &iter.second;
@@ -9924,7 +9921,7 @@ steamcompmgr_main(int argc, char **argv)
 						{
 							if ( hasRepaintNonBasePlane )
 							{
-								if ( nIgnoredOverlayRepaints >= cv_adaptive_sync_overlay_cycles )
+								if ( !cv_adaptive_sync_ignore_overlay && nIgnoredOverlayRepaints >= cv_adaptive_sync_overlay_cycles )
 								{
 									// If we hit vblank and we previously punted on drawing an overlay
 									// we should go ahead and draw now.
