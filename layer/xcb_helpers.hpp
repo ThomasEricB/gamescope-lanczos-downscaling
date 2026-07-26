@@ -157,6 +157,14 @@ namespace xcb {
     };
   }
 
+  static void forceRedraw(xcb_connection_t* connection, xcb_window_t window) {
+    // Zero width/height clears the whole window, and exposures makes the
+    // server send Expose so the client repaints. Checked so a BadWindow
+    // from a window that just died is swallowed here instead of reaching
+    // the app's X error handler.
+    free(xcb_request_check(connection, xcb_clear_area_checked(connection, true, window, 0, 0, 0, 0)));
+  }
+
   static VkExtent2D max(VkExtent2D a, VkExtent2D b) {
     return VkExtent2D {
       .width  = std::max<uint32_t>(a.width,  b.width),
