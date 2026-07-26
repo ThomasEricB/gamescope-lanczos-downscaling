@@ -131,6 +131,8 @@ static std::map< VkFormat, std::map< uint64_t, VkDrmFormatModifierPropertiesEXT 
 static std::unordered_map<uint32_t, std::vector<uint64_t>> s_SampledModifierFormats = {};
 static struct wlr_drm_format_set sampledShmFormats = {};
 static struct wlr_drm_format_set sampledDRMFormats = {};
+// Subset of sampledDRMFormats that we can also use for our own composition output.
+static struct wlr_drm_format_set outputDRMFormats = {};
 
 std::span<const uint64_t> GetSupportedSampleModifiers( uint32_t uDrmFormat )
 {
@@ -3126,8 +3128,7 @@ bool vulkan_init_format(VkFormat format, uint32_t drmFormat)
 			if ( !is_image_format_modifier_supported( format, drmFormat, modifier ) )
 				continue;
 
-			const VkFormatFeatureFlags neededFeatures = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT | VK_FORMAT_FEATURE_TRANSFER_SRC_BIT;
-			if ( ( modifierProps[j].drmFormatModifierTilingFeatures & neededFeatures ) != neededFeatures )
+			if ( ( modifierProps[j].drmFormatModifierTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT ) == 0 )
 			{
 				continue;
 			}
@@ -3141,6 +3142,10 @@ bool vulkan_init_format(VkFormat format, uint32_t drmFormat)
 
 			wlr_drm_format_set_add( &sampledDRMFormats, drmFormat, modifier );
 			s_SampledModifierFormats[ drmFormat ].emplace_back( modifier );
+
+			const VkFormatFeatureFlags outputFeatures = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT | VK_FORMAT_FEATURE_TRANSFER_SRC_BIT;
+			if ( ( modifierProps[j].drmFormatModifierTilingFeatures & outputFeatures ) == outputFeatures )
+				wlr_drm_format_set_add( &outputDRMFormats, drmFormat, modifier );
 		}
 
 		DRMModifierProps[ format ] = map;
@@ -3152,6 +3157,7 @@ bool vulkan_init_format(VkFormat format, uint32_t drmFormat)
 			return false;
 
 		wlr_drm_format_set_add( &sampledDRMFormats, drmFormat, DRM_FORMAT_MOD_INVALID );
+		wlr_drm_format_set_add( &outputDRMFormats, drmFormat, DRM_FORMAT_MOD_INVALID );
 		return false;
 	}
 }
@@ -3181,8 +3187,10 @@ bool vulkan_init_formats()
 	{
 		uint32_t fmt = sampledDRMFormats.formats[ i ].format;
 #if HAVE_DRM
+		// Flag the ones we can't composite into, eg. multi-planar formats.
+		const char *pszNote = wlr_drm_format_set_get( &outputDRMFormats, fmt ) ? "" : " (no output usage)";
 		char *name = drmGetFormatName(fmt);
-		vk_log.infof( "  %s (0x%" PRIX32 ")", name, fmt );
+		vk_log.infof( "  %s (0x%" PRIX32 ")%s", name, fmt, pszNote );
 		free(name);
 #endif
 	}
@@ -4888,17 +4896,9 @@ bool vulkan_has_drm_props()
 	return false;
 }
 
-bool vulkan_supports_drm_format( uint32_t drmFormat )
+bool vulkan_supports_output_drm_format( uint32_t drmFormat )
 {
-	for ( size_t i = 0; i < sampledDRMFormats.len; i++ )
-	{
-		uint32_t fmt = sampledDRMFormats.formats[ i ].format;
-
-		if ( fmt == drmFormat )
-			return true;
-	}
-
-	return false;
+	return wlr_drm_format_set_get( &outputDRMFormats, drmFormat ) != nullptr;
 }
 
 gamescope::Rc<CVulkanTexture> vulkan_get_last_output_image( bool partial, bool defer )

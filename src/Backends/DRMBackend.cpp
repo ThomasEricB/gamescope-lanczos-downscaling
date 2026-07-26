@@ -705,7 +705,7 @@ static uint32_t pick_plane_format( const struct wlr_drm_format_set *formats, uin
 		uint32_t fmt = formats->formats[i].format;
 
 		// Skip formats that we cannot use with the Vulkan device
-		if ( !vulkan_supports_drm_format( fmt ) )
+		if ( !vulkan_supports_output_drm_format( fmt ) )
 			continue;
 
 		if ( fmt == Xformat ) {
