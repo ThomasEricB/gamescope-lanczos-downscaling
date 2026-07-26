@@ -722,7 +722,7 @@ void gamescope_xwayland_server_t::destroy_content_override( struct wlserver_cont
 	content_overrides.erase( co->x11_window );
 	free( co );
 }
-void gamescope_xwayland_server_t::destroy_content_override( struct wlserver_x11_surface_info *x11_surface, struct wlr_surface *surf )
+void gamescope_xwayland_server_t::destroy_content_override( struct wlserver_x11_surface_info *x11_surface, struct wlr_surface *surf, struct wl_resource *gamescope_swapchain_resource )
 {
 #ifdef GAMESCOPE_SWAPCHAIN_DEBUG
 	wl_log.infof( "destroy_content_override LOOKUP: x11_surface: %p x11_window: 0x%x surf: %p", x11_surface, x11_surface->x11_id, surf );
@@ -731,10 +731,17 @@ void gamescope_xwayland_server_t::destroy_content_override( struct wlserver_x11_
 	if (iter == content_overrides.end())
 		return;
 
+	struct wlserver_content_override *co = iter->second;
+
+	// A dying swapchain must not tear down an override owned by its
+	// replacement on the same wl_surface. A null owner here is our own,
+	// clear_content_override_swapchain already nulled it for the resource
+	// being destroyed.
+	if ( gamescope_swapchain_resource && co->gamescope_swapchain && co->gamescope_swapchain != gamescope_swapchain_resource )
+		return;
+
 	if ( x11_surface->override_surface == surf )
 		x11_surface->override_surface = nullptr;
-
-	struct wlserver_content_override *co = iter->second;
 
 #ifdef GAMESCOPE_SWAPCHAIN_DEBUG
 	wl_log.infof( "destroy_content_override LOOKUP FOUND: x11_surface: %p x11_window: 0x%x surf: %p co: %p co->surface: %p", x11_surface, x11_surface->x11_id, surf, co, co->surface );
@@ -922,7 +929,7 @@ static void gamescope_swapchain_destroy_co( struct wl_resource *resource )
 #ifdef GAMESCOPE_SWAPCHAIN_DEBUG
 			wl_log.infof( "gamescope_swapchain_destroy_co swapchain: %p GOT X11 SURFACE", resource );
 #endif
-			x11_surface->xwayland_server->destroy_content_override( x11_surface, wl_surface_info->wlr );
+			x11_surface->xwayland_server->destroy_content_override( x11_surface, wl_surface_info->wlr, resource );
 		}
 	}
 }

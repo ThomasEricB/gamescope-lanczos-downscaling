@@ -79,7 +79,7 @@ public:
 	std::vector<ResListEntry_t>& retrieve_commits();
 
 	void handle_override_window_content( struct wl_client *client, struct wl_resource *gamescope_swapchain_resource, struct wlr_surface *surface, uint32_t x11_window );
-	void destroy_content_override( struct wlserver_x11_surface_info *x11_surface, struct wlr_surface *surf);
+	void destroy_content_override( struct wlserver_x11_surface_info *x11_surface, struct wlr_surface *surf, struct wl_resource *gamescope_swapchain_resource = nullptr );
 	void destroy_content_override(struct wlserver_content_override *co);
 	void clear_content_override_swapchain( struct wl_resource *gamescope_swapchain_resource );
 
