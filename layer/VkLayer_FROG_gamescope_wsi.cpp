@@ -508,6 +508,46 @@ namespace GamescopeWSILayer {
         return false;
       }
 
+      // A sibling elsewhere in the toplevel's tree can obscure us too, and
+      // its content only reaches the screen through XWayland (eg. CEF puts
+      // each browser widget in its own child window), so flipping ours over
+      // the toplevel would hide it. Only siblings stacked above us matter,
+      // anything below is occluded by us covering the toplevel.
+      if (*toplevelWindow != window) {
+        bool reachedToplevel = false;
+        xcb_window_t belowWindow = window;
+        for (std::optional<xcb_window_t> parent = xcb::getParentWindow(connection, window);
+             parent;
+             parent = xcb::getParentWindow(connection, *parent)) {
+          auto largestObscuringSiblingSize = xcb::getLargestObscuringChildWindowSize(connection, *parent, belowWindow);
+          if (!largestObscuringSiblingSize) {
+            fprintf(stderr, "[Gamescope WSI] canBypassXWayland: failed to get sibling info for window 0x%x under parent 0x%x.\n", window, *parent);
+            return false;
+          }
+
+          if (largestObscuringSiblingSize->width > 1 || largestObscuringSiblingSize->height > 1) {
+#if GAMESCOPE_WSI_BYPASS_DEBUG
+            fprintf(stderr, "[Gamescope WSI] Largest obscuring sibling size: %u %u\n", largestObscuringSiblingSize->width, largestObscuringSiblingSize->height);
+#endif
+            return false;
+          }
+
+          if (*parent == *toplevelWindow) {
+            reachedToplevel = true;
+            break;
+          }
+
+          belowWindow = *parent;
+        }
+
+        // The walk failing to reach the toplevel means the tree changed under
+        // us, refuse rather than risk missing an obscuring sibling.
+        if (!reachedToplevel) {
+          fprintf(stderr, "[Gamescope WSI] canBypassXWayland: failed to walk to toplevel for window 0x%x.\n", window);
+          return false;
+        }
+      }
+
       // If this window is not within 2px margin of error for the size of
       // it's top level window, then it cannot be flipped.
       //

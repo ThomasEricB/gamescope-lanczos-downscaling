@@ -164,7 +164,7 @@ namespace xcb {
     };
   }
 
-  static std::optional<VkExtent2D> getLargestObscuringChildWindowSize(xcb_connection_t* connection, xcb_window_t window) {
+  static std::optional<VkExtent2D> getLargestObscuringChildWindowSize(xcb_connection_t* connection, xcb_window_t window, xcb_window_t ignoreBelowWindow = XCB_NONE) {
     VkExtent2D largestExtent = {};
 
     xcb_query_tree_cookie_t cookie = xcb_query_tree(connection, window);
@@ -182,8 +182,16 @@ namespace xcb {
     }
 
     xcb_window_t* children = xcb_query_tree_children(reply.get());
+    // Children come in bottom-to-top stacking order, so ignoreBelowWindow
+    // skips that window and everything stacked below it.
+    bool above = ignoreBelowWindow == XCB_NONE;
     for (uint32_t i = 0; i < reply->children_len; i++) {
       xcb_window_t child = children[i];
+
+      if (!above) {
+        above = child == ignoreBelowWindow;
+        continue;
+      }
 
       xcb_get_window_attributes_cookie_t attributeCookie = xcb_get_window_attributes(connection, child);
       auto attributeReply = Reply<xcb_get_window_attributes_reply_t>{ xcb_get_window_attributes_reply(connection, attributeCookie, nullptr) };
@@ -191,6 +199,7 @@ namespace xcb {
       const bool obscuring =
         attributeReply &&
         attributeReply->map_state == XCB_MAP_STATE_VIEWABLE &&
+        attributeReply->_class != XCB_WINDOW_CLASS_INPUT_ONLY &&
         !attributeReply->override_redirect;
 
       if (obscuring) {
@@ -200,6 +209,11 @@ namespace xcb {
         }
       }
     }
+
+    // ignoreBelowWindow vanished mid-scan (reparented or destroyed), so
+    // everything was skipped. Report failure so the caller fails safe.
+    if (!above)
+      return std::nullopt;
 
     return largestExtent;
   }
