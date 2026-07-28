@@ -88,6 +88,7 @@ struct xwayland_ctx_t final : public gamescope::IWaitable
 
 	focus_t 		focus;
 	Window 			currentKeyboardFocusWindow;
+	Window			netActiveWindow;
 	Window			focusControlWindow;
 
 	std::unique_ptr<MouseCursor> cursor;

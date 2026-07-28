@@ -4004,6 +4004,13 @@ static void set_wm_state( xwayland_ctx_t *ctx, Window win, uint32_t state )
 				sizeof(wmState) / sizeof(wmState[0]));
 }
 
+static void set_net_active_window( xwayland_ctx_t *ctx, Window win )
+{
+	ctx->netActiveWindow = win;
+	XChangeProperty(ctx->dpy, ctx->root, ctx->atoms.netActiveWindowAtom,
+				XA_WINDOW, 32, PropModeReplace, (unsigned char *)&win, 1);
+}
+
 void xwayland_ctx_t::DetermineAndApplyFocus( const std::vector< steamcompmgr_win_t* > &vecPossibleFocusWindows )
 {
 	xwayland_ctx_t *ctx = this;
@@ -4193,9 +4200,7 @@ void xwayland_ctx_t::DetermineAndApplyFocus( const std::vector< steamcompmgr_win
 			XSetInputFocus(ctx->dpy, keyboardFocusWindow, nRevertMode, CurrentTime);
 
 			// wine >= 10.0 treats _NET_ACTIVE_WINDOW as foreground, so it must track real keyboard focus.
-			Window activeWindow = keyboardFocusWin->xwayland().id;
-			XChangeProperty(ctx->dpy, ctx->root, ctx->atoms.netActiveWindowAtom,
-							XA_WINDOW, 32, PropModeReplace, (unsigned char *)&activeWindow, 1);
+			set_net_active_window( ctx, keyboardFocusWin->xwayland().id );
 		}
 
 		if ( ctx->focus.inputFocusWindow != inputFocus ||
@@ -5934,6 +5939,9 @@ handle_client_message(xwayland_ctx_t *ctx, XClientMessageEvent *ev)
 		else if ( ev->message_type == ctx->atoms.netActiveWindowAtom )
 		{
 			w->Raise();
+
+			// wine >= 10.0 only clears its pending activation on a later property write, so always answer.
+			set_net_active_window( ctx, ctx->netActiveWindow );
 		}
 		else if ( ev->message_type == ctx->atoms.netWMStateAtom )
 		{
