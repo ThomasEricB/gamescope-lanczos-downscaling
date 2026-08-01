@@ -3390,6 +3390,23 @@ bool vulkan_supports_hdr10()
 
 extern bool g_bOutputHDREnabled;
 
+// Not every surface format supports the usage our compute shaders need,
+// e.g. NVIDIA hardware can't do storage images on A2R10G10B10.
+static bool vulkan_swapchain_format_supports_usage( VkFormat format, VkImageUsageFlags usage )
+{
+	VkPhysicalDeviceImageFormatInfo2 imageFormatInfo = {
+		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2,
+		.format = format,
+		.type = VK_IMAGE_TYPE_2D,
+		.tiling = VK_IMAGE_TILING_OPTIMAL,
+		.usage = usage,
+	};
+	VkImageFormatProperties2 imageFormatProps = {
+		.sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2,
+	};
+	return g_device.vk.GetPhysicalDeviceImageFormatProperties2( g_device.physDev(), &imageFormatInfo, &imageFormatProps ) == VK_SUCCESS;
+}
+
 bool vulkan_make_swapchain( VulkanOutput_t *pOutput )
 {
 	uint32_t imageCount = pOutput->surfaceCaps.minImageCount + 1;
@@ -3397,36 +3414,30 @@ bool vulkan_make_swapchain( VulkanOutput_t *pOutput )
 	uint32_t surfaceFormat = formatCount;
 	VkColorSpaceKHR preferredColorSpace = g_bOutputHDREnabled ? VK_COLOR_SPACE_HDR10_ST2084_EXT : VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
 
-	if ( surfaceFormat == formatCount )
+	constexpr VkImageUsageFlags uSwapchainUsage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+	constexpr VkFormat preferredFormats[] =
 	{
+		VK_FORMAT_A2B10G10R10_UNORM_PACK32,
+		VK_FORMAT_A2R10G10B10_UNORM_PACK32,
+		VK_FORMAT_B8G8R8A8_UNORM,
+	};
+
+	for ( VkFormat preferredFormat : preferredFormats )
+	{
+		if ( !vulkan_swapchain_format_supports_usage( preferredFormat, uSwapchainUsage ) )
+			continue;
+
 		for ( surfaceFormat = 0; surfaceFormat < formatCount; surfaceFormat++ )
 		{
-			if ( pOutput->surfaceFormats[ surfaceFormat ].format == VK_FORMAT_A2B10G10R10_UNORM_PACK32 &&
+			if ( pOutput->surfaceFormats[ surfaceFormat ].format == preferredFormat &&
 				 pOutput->surfaceFormats[ surfaceFormat ].colorSpace == preferredColorSpace )
 				break;
 		}
+
+		if ( surfaceFormat != formatCount )
+			break;
 	}
 
-	if ( surfaceFormat == formatCount )
-	{
-		for ( surfaceFormat = 0; surfaceFormat < formatCount; surfaceFormat++ )
-		{
-			if ( pOutput->surfaceFormats[ surfaceFormat ].format == VK_FORMAT_A2R10G10B10_UNORM_PACK32 &&
-				 pOutput->surfaceFormats[ surfaceFormat ].colorSpace == preferredColorSpace )
-				break;
-		}
-	}
-
-	if ( surfaceFormat == formatCount )
-	{
-		for ( surfaceFormat = 0; surfaceFormat < formatCount; surfaceFormat++ )
-		{
-			if ( pOutput->surfaceFormats[ surfaceFormat ].format == VK_FORMAT_B8G8R8A8_UNORM &&
-				 pOutput->surfaceFormats[ surfaceFormat ].colorSpace == preferredColorSpace )
-				break;
-		}
-	}
-	
 	if ( surfaceFormat == formatCount )
 		return false;
 
@@ -3460,7 +3471,7 @@ bool vulkan_make_swapchain( VulkanOutput_t *pOutput )
 			.height = g_nOutputHeight,
 		},
 		.imageArrayLayers = 1,
-		.imageUsage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+		.imageUsage = uSwapchainUsage,
 		.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
 		.preTransform = pOutput->surfaceCaps.currentTransform,
 		.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
