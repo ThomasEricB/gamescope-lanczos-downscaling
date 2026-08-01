@@ -163,7 +163,7 @@ public:
 	};
 
 	bool BInit( uint32_t width, uint32_t height, uint32_t depth, uint32_t drmFormat, createFlags flags, wlr_dmabuf_attributes *pDMA = nullptr, uint32_t contentWidth = 0, uint32_t contentHeight = 0, CVulkanTexture *pExistingImageToReuseMemory = nullptr, gamescope::OwningRc<gamescope::IBackendFb> pBackendFb = nullptr );
-	bool BInitFromSwapchain( VkImage image, uint32_t width, uint32_t height, VkFormat format );
+	bool BInitFromSwapchain( VkImage image, uint32_t width, uint32_t height, VkFormat format, bool bSwapRBStorage );
 
 	uint32_t IncRef();
 	uint32_t DecRef();
@@ -173,6 +173,9 @@ public:
 	inline VkImageView view( bool linear ) { return linear ? m_linearView : m_srgbView; }
 	inline VkImageView linearView() { return m_linearView; }
 	inline VkImageView srgbView() { return m_srgbView; }
+	// View to write through, R/B-swapped when the driver can't store the native format.
+	inline VkImageView storageView() { return m_storageView != VK_NULL_HANDLE ? m_storageView : m_srgbView; }
+	inline bool bStorageSwapsRB() const { return m_storageView != VK_NULL_HANDLE; }
 	inline VkImageView lumaView() { return m_lumaView; }
 	inline VkImageView chromaView() { return m_chromaView; }
 	inline uint32_t width() { return m_width; }
@@ -226,6 +229,7 @@ private:
 	
 	VkImageView m_srgbView = VK_NULL_HANDLE;
 	VkImageView m_linearView = VK_NULL_HANDLE;
+	VkImageView m_storageView = VK_NULL_HANDLE;
 
 	VkImageView m_lumaView = VK_NULL_HANDLE;
 	VkImageView m_chromaView = VK_NULL_HANDLE;
@@ -673,6 +677,8 @@ struct PipelineInfo_t
 	uint32_t outputEOTF;
 	bool itmEnable;
 
+	bool outputSwapRB;
+
 	bool operator==(const PipelineInfo_t& o) const {
 		return
 		shaderType == o.shaderType &&
@@ -682,7 +688,8 @@ struct PipelineInfo_t
 		compositeDebug == o.compositeDebug &&
 		colorspaceMask == o.colorspaceMask &&
 		outputEOTF == o.outputEOTF &&
-		itmEnable == o.itmEnable;
+		itmEnable == o.itmEnable &&
+		outputSwapRB == o.outputSwapRB;
 	}
 };
 
@@ -706,6 +713,7 @@ namespace std
 			hash = hash_combine(hash, k.colorspaceMask);
 			hash = hash_combine(hash, k.outputEOTF);
 			hash = hash_combine(hash, k.itmEnable);
+			hash = hash_combine(hash, k.outputSwapRB);
 			return hash;
 		}
 	};
@@ -836,7 +844,7 @@ public:
 	bool BInit(VkInstance instance, VkSurfaceKHR surface);
 
 	VkSampler sampler(SamplerState key);
-	VkPipeline pipeline(ShaderType type, uint32_t layerCount = 1, uint32_t ycbcrMask = 0, uint32_t blur_layers = 0, uint32_t colorspace_mask = 0, uint32_t output_eotf = EOTF_Gamma22, bool itm_enable = false);
+	VkPipeline pipeline(ShaderType type, uint32_t layerCount = 1, uint32_t ycbcrMask = 0, uint32_t blur_layers = 0, uint32_t colorspace_mask = 0, uint32_t output_eotf = EOTF_Gamma22, bool itm_enable = false, bool output_swap_rb = false);
 	int32_t findMemoryType( VkMemoryPropertyFlags properties, uint32_t requiredTypeBits );
 	std::unique_ptr<CVulkanCmdBuffer> commandBuffer();
 	uint64_t submit( std::unique_ptr<CVulkanCmdBuffer> cmdBuf);
@@ -915,7 +923,7 @@ protected:
 	bool createPools();
 	bool createShaders();
 	bool createScratchResources();
-	VkPipeline compilePipeline(uint32_t layerCount, uint32_t ycbcrMask, ShaderType type, uint32_t blur_layer_count, uint32_t composite_debug, uint32_t colorspace_mask, uint32_t output_eotf, bool itm_enable);
+	VkPipeline compilePipeline(uint32_t layerCount, uint32_t ycbcrMask, ShaderType type, uint32_t blur_layer_count, uint32_t composite_debug, uint32_t colorspace_mask, uint32_t output_eotf, bool itm_enable, bool output_swap_rb);
 	void compileAllPipelines(std::stop_token st);
 
 	VkDevice m_device = nullptr;

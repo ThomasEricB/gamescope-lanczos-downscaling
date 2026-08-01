@@ -61,7 +61,7 @@ void main() {
     }
 
     outputValue = encodeOutputColor(outputValue);
-    imageStore(dst, rotateOutputCoord(coord, u_rotation), vec4(outputValue, 0));
+    store_output(rotateOutputCoord(coord, u_rotation), vec4(outputValue, 0));
 
     if (checkDebugFlag(compositedebug_Markers))
         compositing_debug(coord, u_rotation);

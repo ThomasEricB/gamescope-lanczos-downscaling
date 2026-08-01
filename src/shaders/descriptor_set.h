@@ -8,6 +8,7 @@ layout(constant_id = 3) const int  c_blur_layer_count = 0;
 layout(constant_id = 4) const uint c_colorspaceMask = 0;
 layout(constant_id = 5) const uint c_output_eotf = 0;
 layout(constant_id = 7) const bool c_itm_enable = false;
+layout(constant_id = 8) const bool c_output_swap_rb = false;
 
 const int colorspace_linear = 0;
 const int colorspace_sRGB = 1;
@@ -48,6 +49,12 @@ layout(binding = 1, rgba8) writeonly uniform image2D dst;
 // alias
 layout(binding = 1, rgba8) writeonly uniform image2D dst_luma;
 layout(binding = 2, rgba8) writeonly uniform image2D dst_chroma;
+
+// The output may be bound as a R/B-swapped storage view when the driver
+// can't store its native format, swap the channels back at store time.
+void store_output(ivec2 coord, vec4 value) {
+    imageStore(dst, coord, c_output_swap_rb ? value.bgra : value);
+}
 
 layout(binding = 3) uniform sampler2D s_samplers[VKR_SAMPLER_SLOTS];
 layout(binding = 4) uniform sampler2D s_ycbcr_samplers[VKR_SAMPLER_SLOTS];

@@ -42,7 +42,7 @@ void main() {
     }
 
     outputValue.rgb = encodeOutputColor(outputValue.rgb);
-    imageStore(dst, rotateOutputCoord(coord, u_rotation), outputValue);
+    store_output(rotateOutputCoord(coord, u_rotation), outputValue);
 
     // Indicator to quickly tell if we're in the compositing path or not.
     if (checkDebugFlag(compositedebug_Markers))
