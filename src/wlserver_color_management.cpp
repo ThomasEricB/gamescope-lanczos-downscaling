@@ -16,6 +16,7 @@
 #include <cstring>
 #include <memory>
 #include <optional>
+#include <vector>
 
 #include "wlserver.hpp"
 #include "backend.h"
@@ -422,6 +423,25 @@ static const struct wp_color_management_surface_v1_interface cm_surface_impl = {
 // Surface feedback
 //
 
+static std::vector<struct wl_resource *> s_vecFeedbackResources;
+
+static void cm_feedback_resource_destroy( struct wl_resource *resource )
+{
+	std::erase( s_vecFeedbackResources, resource );
+}
+
+// Called (under the wlserver lock) when the output flips between SDR and HDR
+// so clients re-query the preferred description. Chromium in particular keeps
+// rendering its previous colorspace until this event arrives.
+void wlserver_colormgmt_output_changed( void )
+{
+	uint32_t uIdentity = currentHDROutput ? 1000001 : 1000000;
+	cm_log.infof( "output changed -> preferred_changed(%u) to %zu feedback object(s)",
+		uIdentity, s_vecFeedbackResources.size() );
+	for ( struct wl_resource *resource : s_vecFeedbackResources )
+		wp_color_management_surface_feedback_v1_send_preferred_changed( resource, uIdentity );
+}
+
 static void cm_feedback_handle_destroy( struct wl_client *, struct wl_resource *resource )
 {
 	wl_resource_destroy( resource );
@@ -513,7 +533,8 @@ static void manager_get_surface_feedback( struct wl_client *client, struct wl_re
 		wl_client_post_no_memory( client );
 		return;
 	}
-	wl_resource_set_implementation( feedback_resource, &cm_feedback_impl, nullptr, nullptr );
+	wl_resource_set_implementation( feedback_resource, &cm_feedback_impl, nullptr, cm_feedback_resource_destroy );
+	s_vecFeedbackResources.push_back( feedback_resource );
 
 	// Nudge the client to query the preferred description: some clients only
 	// evaluate HDR after this event rather than calling get_preferred on

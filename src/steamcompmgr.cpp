@@ -9537,7 +9537,15 @@ steamcompmgr_main(int argc, char **argv)
 			currentOutputHeight = g_nOutputHeight;
 			currentOutputRefresh = g_nOutputRefresh;
 			currentOutputRotation = g_uOutputRotation;
-			currentHDROutput = g_bOutputHDREnabled;
+			if ( currentHDROutput != g_bOutputHDREnabled )
+			{
+				currentHDROutput = g_bOutputHDREnabled;
+
+				extern void wlserver_colormgmt_output_changed( void );
+				wlserver_lock();
+				wlserver_colormgmt_output_changed();
+				wlserver_unlock();
+			}
 			currentHDRForce = g_bForceHDRSupportDebug;
 
 #if HAVE_PIPEWIRE
