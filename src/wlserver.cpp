@@ -2204,6 +2204,9 @@ bool wlserver_init( void ) {
 
 	create_presentation_time();
 
+	extern void create_color_management( void );
+	create_color_management();
+
 	// Have to make this old ancient thing for compat with older XWayland.
 	// Someday, he will be purged.
 	wlr_drm_create(wlserver.display, wlserver.wlr.renderer);

@@ -114,6 +114,7 @@ src = [
   'main.cpp',
   'edid.cpp',
   'wlserver.cpp',
+  'wlserver_color_management.cpp',
   'vblankmanager.cpp',
   'rendervulkan.cpp',
   'log.cpp',
