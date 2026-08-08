@@ -1994,6 +1994,7 @@ void xdg_toplevel_new(struct wl_listener *listener, void *data)
 	wl_signal_add(&xdg_surface->events.destroy, &surface_info->destroy);
 
 	surface_info->xdg_surface = xdg_surface;
+	surface_info->bIsToplevel = true;
 }
 
 uint32_t get_appid_from_pid( pid_t pid );
