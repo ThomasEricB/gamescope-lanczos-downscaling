@@ -165,7 +165,9 @@ static void info_send_description( struct wl_resource *info_resource, const Game
 static ImageDescRef get_output_description()
 {
 	auto desc = std::make_shared<GamescopeImageDescription>();
-	desc->uIdentity = s_uNextIdentity++;
+	// Stable identities: identity equality tells clients the description
+	// contents are unchanged, so keep one per output state.
+	desc->uIdentity = currentHDROutput ? 1000001 : 1000000;
 	if ( currentHDROutput )
 	{
 		desc->ouTF = WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_ST2084_PQ;
@@ -512,6 +514,13 @@ static void manager_get_surface_feedback( struct wl_client *client, struct wl_re
 		return;
 	}
 	wl_resource_set_implementation( feedback_resource, &cm_feedback_impl, nullptr, nullptr );
+
+	// Nudge the client to query the preferred description: some clients only
+	// evaluate HDR after this event rather than calling get_preferred on
+	// their own.
+	wp_color_management_surface_feedback_v1_send_preferred_changed( feedback_resource,
+		currentHDROutput ? 1000001 : 1000000 );
+	cm_log.infof( "get_surface_feedback -> initial preferred_changed(%u)", currentHDROutput ? 1000001 : 1000000 );
 }
 
 static void manager_create_icc_creator( struct wl_client *, struct wl_resource *resource, uint32_t )
@@ -533,10 +542,18 @@ static void manager_create_parametric_creator( struct wl_client *client, struct 
 		new GamescopeImageDescription(), params_creator_resource_destroy );
 }
 
-static void manager_create_windows_scrgb( struct wl_client *, struct wl_resource *resource, uint32_t )
+static void manager_create_windows_scrgb( struct wl_client *client, struct wl_resource *resource, uint32_t image_description )
 {
-	wl_resource_post_error( resource, WP_COLOR_MANAGER_V1_ERROR_UNSUPPORTED_FEATURE,
-		"windows_scrgb is not supported" );
+	// scRGB: sRGB primaries, extended linear transfer, 1.0 == 80 nits.
+	// Maps to GAMESCOPE_APP_TEXTURE_COLORSPACE_SCRGB via EXTENDED_SRGB_LINEAR.
+	auto desc = std::make_shared<GamescopeImageDescription>();
+	desc->uIdentity = s_uNextIdentity++;
+	desc->ouTF = WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_EXT_LINEAR;
+	desc->ouPrimaries = WP_COLOR_MANAGER_V1_PRIMARIES_SRGB;
+	cm_log.infof( "create_windows_scrgb -> identity=%u", desc->uIdentity );
+	struct wl_resource *desc_resource = create_description_resource( client, wl_resource_get_version( resource ), image_description, desc );
+	if ( desc_resource )
+		wp_image_description_v1_send_ready( desc_resource, desc->uIdentity );
 }
 
 static const struct wp_color_manager_v1_interface color_manager_impl = {
@@ -568,6 +585,7 @@ static void color_manager_bind( struct wl_client *client, void *, uint32_t versi
 	wp_color_manager_v1_send_supported_feature( resource, WP_COLOR_MANAGER_V1_FEATURE_SET_LUMINANCES );
 	wp_color_manager_v1_send_supported_feature( resource, WP_COLOR_MANAGER_V1_FEATURE_SET_MASTERING_DISPLAY_PRIMARIES );
 	wp_color_manager_v1_send_supported_feature( resource, WP_COLOR_MANAGER_V1_FEATURE_EXTENDED_TARGET_VOLUME );
+	wp_color_manager_v1_send_supported_feature( resource, WP_COLOR_MANAGER_V1_FEATURE_WINDOWS_SCRGB );
 
 	wp_color_manager_v1_send_supported_tf_named( resource, WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_SRGB );
 	wp_color_manager_v1_send_supported_tf_named( resource, WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_GAMMA22 );
