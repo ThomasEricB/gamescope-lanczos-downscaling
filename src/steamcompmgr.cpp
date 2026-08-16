@@ -2565,7 +2565,7 @@ gamescope::ConVar<bool> cv_paint_cursor_plane{ "paint_cursor_plane", true };
 gamescope::ConVar<bool> cv_paint_mura_plane{ "paint_mura_plane", true };
 
 static void
-paint_all( global_focus_t *pFocus, bool async )
+paint_all( global_focus_t *pFocus, bool async, bool bRepeatFrame )
 {
 	if ( !pFocus )
 		return;
@@ -2622,6 +2622,7 @@ paint_all( global_focus_t *pFocus, bool async )
 	frameInfo.applyOutputColorMgmt = g_ColorMgmt.pending.enabled;
 	frameInfo.outputEncodingEOTF = g_ColorMgmt.pending.outputEncodingEOTF;
 	frameInfo.allowVRR = cv_adaptive_sync;
+	frameInfo.bRepeatFrame = bRepeatFrame;
 	frameInfo.bFadingOut = fadingOut;
 
 	// If the window we'd paint as the base layer is the streaming client,
@@ -9400,6 +9401,7 @@ steamcompmgr_main(int argc, char **argv)
 		for ( auto &iter : g_VirtualConnectorFocuses )
 		{
 			global_focus_t *pPaintFocus = &iter.second;
+			bool bRepeatFrame = false;
 
 			if ( vblank )
 			{
@@ -9517,6 +9519,8 @@ steamcompmgr_main(int argc, char **argv)
 						     cv_adaptive_sync_idle_hold )
 						{
 							bShouldPaint = true;
+							// Cursor or overlay damage must really be drawn, only unchanged frames repeat.
+							bRepeatFrame = !hasRepaint && !hasCursorRepaint && !hasRepaintNonBasePlane;
 						}
 
 						if ( bIsVBlankFromTimer )
@@ -9556,7 +9560,7 @@ steamcompmgr_main(int argc, char **argv)
 
 			if ( bShouldPaint )
 			{
-				paint_all( pPaintFocus, eFlipType == FlipType::Async );
+				paint_all( pPaintFocus, eFlipType == FlipType::Async, bRepeatFrame );
 
 				bPainted = true;
 			}
