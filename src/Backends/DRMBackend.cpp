@@ -1315,6 +1315,12 @@ bool init_drm(struct drm_t *drm, int width, int height, int refresh)
 		drm_log.errorf("Syncobjs are not supported by the KMS driver");
 	}
 
+	if ( vulkan_is_nvidia() && !cv_drm_debug_disable_in_fence_fd )
+	{
+		drm_log.infof( "NVIDIA proprietary driver: proactively disabling IN_FENCE_FD to avoid EPERM on atomic commits" );
+		cv_drm_debug_disable_in_fence_fd = true;
+	}
+
 	if (drmGetCap(drm->fd, DRM_CAP_ADDFB2_MODIFIERS, &cap) == 0 && cap != 0) {
 		drm->allow_modifiers = true;
 	}
@@ -4008,6 +4014,11 @@ namespace gamescope
 
 		virtual bool SupportsExplicitSync() const override
 		{
+			// The NVIDIA proprietary driver cannot import DRM syncobj FDs as
+			// Vulkan timeline semaphores via OPAQUE_FD. Fall back to implicit sync.
+			if ( vulkan_is_nvidia() )
+				return false;
+
 #if __linux__
 			auto [nMajor, nMinor, nPatch] = GetKernelVersion();
 			

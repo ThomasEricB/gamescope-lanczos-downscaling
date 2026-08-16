@@ -461,6 +461,21 @@ bool CVulkanDevice::createDevice()
 
 	vk_log.infof( "physical device %s DRM format modifiers", m_bSupportsModifiers ? "supports" : "does not support" );
 
+	{
+		VkPhysicalDeviceVulkan12Properties vulkan12Props = {
+			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES,
+		};
+		VkPhysicalDeviceProperties2 driverProps2 = {
+			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+			.pNext = &vulkan12Props,
+		};
+		vk.GetPhysicalDeviceProperties2( physDev(), &driverProps2 );
+
+		m_bIsNvidia = ( vulkan12Props.driverID == VK_DRIVER_ID_NVIDIA_PROPRIETARY );
+		if ( m_bIsNvidia )
+			vk_log.infof( "NVIDIA proprietary driver detected, enabling compatibility workarounds" );
+	}
+
 	if ( !hasDrmProps ) {
 		// This could happen when e.g. running the lavapipe driver
 		// (without an actual physical device)
@@ -2299,7 +2314,9 @@ bool CVulkanTexture::BInit( uint32_t width, uint32_t height, uint32_t depth, uin
 		VkMemoryDedicatedAllocateInfo memory_dedicated_info = {};
 		struct wsi_memory_allocate_info memory_wsi_info = {};
 
-		if ( flags.bFlippable == true )
+		// The WSI memory allocate info pNext is a Mesa-specific extension.
+		// The NVIDIA proprietary driver rejects it, so skip it there.
+		if ( flags.bFlippable == true && !g_device.isNvidia() )
 		{
 			memory_wsi_info = {
 				.sType = VK_STRUCTURE_TYPE_WSI_MEMORY_ALLOCATE_INFO_MESA,
@@ -4515,6 +4532,11 @@ after_composite:
 void vulkan_wait( uint64_t ulSeqNo, bool bReset )
 {
 	return g_device.wait( ulSeqNo, bReset );
+}
+
+bool vulkan_is_nvidia( void )
+{
+	return g_device.isNvidia();
 }
 
 bool vulkan_has_drm_props()
