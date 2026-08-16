@@ -1,5 +1,7 @@
 ## About this gamescope fork: gamescope-lanczos-downscaling
 
+*Currently based on upstream gamescope `3.16.25`.*
+
 Gamescope is the the micro-compositor formerly known as steamcompmgr. This fork adds a high-quality Linux-side "supersampling" path intended for use cases like running a game internally in 4k on a 1080p / 1440p display. I made this for myself and partially for Ross Scott from Accursed Farms. Supersampling is the way to go!
 
 Compared to the FSR/NIS/Bicubic upscalers that upstream gamescope ships, these are **downscalers** and post-process passes — they are intended to run on frames whose internal resolution is *larger* than the output. And yes, you can't downscale using FSR on normal gamescope. Normal gamescope is wired to only use FSR to upscale. If you want to use FSR as a downscaler, consider patching: https://github.com/ValveSoftware/gamescope/pull/702. 
@@ -20,6 +22,46 @@ DISCLAIMER: **This work was partially AI-Assisted.** Meaning, I feed an AI **ACT
 
 The internal plumbing (new command-buffer submission split for the lanczos kernel on NVIDIA, `clearState()` fix for stale LUT pointers, new shader entries in `meson.build`, etc.) lives in `src/rendervulkan.cpp` / `src/rendervulkan.hpp` and the three new `.comp` files under `src/shaders/`.
 
+## NVIDIA fixes
+
+Since supersampling is exactly the workload people run on big NVIDIA cards, this
+fork also carries a set of NVIDIA fixes on top of upstream. Most are backported
+from other forks (see credits); one is original to this fork.
+
+* **Crash on exit is fixed.** gamescope reliably SIGSEGV'd on shutdown whenever
+  the game exited early. The shader pre-compile thread was never stopped or
+  joined, so the process tore down while that thread was still running inside
+  the driver's shader compiler. The backtrace lands in NVIDIA's SPIR-V compiler,
+  so this had been reported as a driver bug — it wasn't. Measured on an RTX 5090
+  / driver 610.57.04 with a cold shader cache: **9/10 runs crashed before, 0/10
+  after.** See `docs/NVIDIA.md`.
+* **The NVIDIA proprietary driver is detected at device creation**, and three
+  Mesa-specific assumptions are skipped when it's in use: the Mesa-only WSI
+  memory allocation `pNext`, DRM explicit sync (falls back to implicit), and
+  `IN_FENCE_FD`, now disabled up front rather than after a failed commit.
+* **Screen capture is much faster.** Recording / streaming / Remote Play ran the
+  RGB→NV12 path into host-visible memory at a few hundred MB/s and blocked the
+  compositor thread, capping the session around 15fps while active. Capture
+  images now stay device-local and move through the copy engine.
+* **Discrete GPU is preferred** when no device is pinned. On hybrid systems (a
+  discrete card alongside an iGPU) gamescope could composite on the *integrated*
+  GPU, because with no surface to filter against it took whichever device
+  enumerated first. `--prefer-vk-device` still takes precedence.
+* Timer fds are now drained, so the event loop no longer busy-spins on
+  `epoll_wait`; a file-descriptor leak on timeline-semaphore import failure is
+  fixed; and the null-dereference in the pre-emptive upscale path — the one the
+  Lanczos filter runs through — is guarded.
+* Optional workaround for an NVIDIA `VK_KHR_present_wait` crash, enabled with
+  `GAMESCOPE_WSI_HIDE_PRESENT_WAIT_EXT=1`. Off by default.
+
+> **Caveat — the two WSI-layer fixes.** The `present_wait` workaround and the
+> forced-bypass fix live in the Vulkan WSI layer, not in the gamescope binary.
+> If you run gamescope straight out of `build/`, your games still load the layer
+> from your **distro's** gamescope package, so those two have no effect.
+> Everything else above works fine from a build tree. To activate them, install
+> this build to a prefix and put its `share/` ahead of `/usr/share` in
+> `XDG_DATA_DIRS`.
+
 ### Credits for the fork
 
 The downscale path was built on top of work by:
@@ -28,6 +70,15 @@ The downscale path was built on top of work by:
 * [**Niklas Haas and the libplacebo contributors**](https://github.com/haasn/libplacebo) — for the original EWA Lanczos implementation.
 * [**Shiandow**](https://github.com/Shiandow/MPDN_Extensions) and [**igv**](https://gist.github.com/igv/a015fc885d5c22e6891820ad89555637) — for the original KrigBilateral.glsl the bilateral denoiser is derived from.
 * [**an3223**](https://github.com/AN3223/dotfiles/tree/master) — for the original `hdeband.glsl` the debander is ported from.
+
+The NVIDIA fixes were backported from other gamescope forks. All commits keep
+their original authorship — credit for that work belongs to:
+
+* [**barramee27**](https://github.com/barramee27/gamescope) — for NVIDIA proprietary-driver detection and the Mesa-assumption workarounds, and for the fd-leak / optional-deref audit.
+* [**Matthew Schwartz**](https://github.com/matte-schwartz/gamescope) — for the NVIDIA capture readback rewrite and the forced-bypass swapchain fix.
+* [**Antheas Kapenekakis**](https://github.com/pcc/gamescope) and the Bazzite fork — for the timer-fd drain fix and the system glm/stb build change.
+* **brainantifreeze** — for the `VK_KHR_present_wait` workaround.
+* [**Sigmachan**](https://github.com/Sigmachan/gamescope) — for discrete-GPU preference and the Blackwell investigation notes.
 
 And also:
 
@@ -64,16 +115,19 @@ Build with:
 
 ```sh
 git submodule update --init --recursive
-
-# Apply the wlroots libinput compile fix (needed on recent Arch / newer
-# libinput; safe to re-run — no-op once already applied).
-git -C subprojects/wlroots apply --check ../../patches/wlroots-libinput-switch-default.patch \
-    && git -C subprojects/wlroots apply ../../patches/wlroots-libinput-switch-default.patch
-
 meson setup build/
 ninja -C build/
 build/src/gamescope -- <game>
 ```
+
+If `catch2` isn't installed, upstream's test suite will fail at configure time.
+Skip it with `meson setup build/ -Denable_tests=false`.
+
+> **Note:** `patches/wlroots-libinput-switch-default.patch` is **no longer
+> needed** and will fail to apply. Upstream has since bumped the wlroots
+> submodule to a version where `switch_type_from_libinput()` returns `bool` and
+> falls through for unknown switch types, which is exactly what the patch was
+> working around. The file is kept only for historical reference.
 
 Install with:
 
