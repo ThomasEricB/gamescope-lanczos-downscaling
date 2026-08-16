@@ -25,8 +25,8 @@ pixman_dep = dependency('pixman-1')
 udev_dep = dependency('libudev')
 
 wlroots_dep = dependency(
-  'wlroots-0.18',
-  version: ['>= 0.18.0', '< 0.19.0'],
+  'wlroots-0.19',
+  version: ['>= 0.19.0', '< 0.20.0'],
   fallback: 'wlroots',
   default_options: ['default_library=static', 'examples=false', 'xwayland=enabled', 'backends=libinput', 'renderers=[]', 'allocators=[]', 'session=enabled'],
 )
@@ -100,6 +100,7 @@ required_wlroots_features = ['xwayland']
 src = [
   'Backends/HeadlessBackend.cpp',
   'Backends/WaylandBackend.cpp',
+  'Utils/DirHelpers.cpp',
   'Utils/TempFiles.cpp',
   'Utils/Version.cpp',
   'Utils/Process.cpp',
@@ -107,6 +108,7 @@ src = [
   'BufferMemo.cpp',
   'steamcompmgr.cpp',
   'convar.cpp',
+  'convar_script.cpp',
   'commit.cpp',
   'color_helpers.cpp',
   'main.cpp',
@@ -208,6 +210,7 @@ gamescope_version = configure_file(
 gamescope_core_src = [
   'convar.cpp',
   'log.cpp',
+  'Utils/DirHelpers.cpp',
   'Utils/Process.cpp',
   'Utils/Version.cpp',
 ]

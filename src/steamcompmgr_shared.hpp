@@ -151,6 +151,7 @@ struct steamcompmgr_win_t {
 	bool bHasHadNonSRGBColorSpace = false;
 
 	bool nudged = false;
+	bool placed = false;
 	bool ignoreOverrideRedirect = false;
 
 	bool unlockedForFrameCallback = false;
@@ -184,6 +185,14 @@ struct steamcompmgr_win_t {
 			return &g_steamcompmgr_xdg_focus;
 		else
 			return nullptr;
+	}
+
+	void Raise() const
+	{
+		if (type != steamcompmgr_win_type_t::XWAYLAND)
+			return;
+
+		XRaiseWindow(xwayland().ctx->dpy, xwayland().id);
 	}
 
 	Rect GetGeometry() const
@@ -230,6 +239,14 @@ struct steamcompmgr_win_t {
 			return xwayland().surface.override_surface;
 		else
 			return nullptr;
+	}
+
+	const char *debug_name() const
+	{
+		if ( title )
+			return title->c_str();
+
+		return pid_name.c_str();
 	}
 
 	gamescope::VirtualConnectorKey_t GetVirtualConnectorKey( gamescope::VirtualConnectorStrategy eStrategy )

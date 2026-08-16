@@ -428,19 +428,52 @@ namespace GamescopeWSILayer {
       return hdrOutput && hdrAllowed;
     }
 
-    bool canBypassXWayland() {
+    bool canBypassXWayland(bool hdrColorspace = false) {
       if (isWayland())
         return true;
 
       auto rect = xcb::getWindowRect(connection, window);
-      auto largestObscuringWindowSize = xcb::getLargestObscuringChildWindowSize(connection, window);
-      auto toplevelWindow = xcb::getToplevelWindow(connection, window);
-      if (!rect || !largestObscuringWindowSize || !toplevelWindow) {
+      if (!rect) {
         fprintf(stderr, "[Gamescope WSI] canBypassXWayland: failed to get window info for window 0x%x.\n", window);
         return false;
       }
 
       cachedWindowRect = *rect;
+
+      // Never bypass windows Wine presents offscreen to GDI-blit onto the
+      // real toplevel: marked with _WINE_ALLOW_FLIP=0 or parented under
+      // Wine's unnamed 1x1 dummy window. The blit can only carry SDR, so
+      // an HDR colorspace always bypasses. Wine also detaches while a
+      // toplevel is transiently unmapped and refusing there wedges games
+      // polling for HDR formats.
+      if (!hdrColorspace) {
+        auto allowFlip = xcb::getPropertyValue<uint32_t>(connection, window, "_WINE_ALLOW_FLIP");
+        if (allowFlip) {
+          if (*allowFlip == 0) {
+#if GAMESCOPE_WSI_BYPASS_DEBUG
+            fprintf(stderr, "[Gamescope WSI] Not bypassing: _WINE_ALLOW_FLIP is 0 for window 0x%x.\n", window);
+#endif
+            return false;
+          }
+        } else if (auto parent = xcb::getParentWindow(connection, window)) {
+          auto parentRect = xcb::getWindowRect(connection, *parent);
+          if (parentRect && parentRect->extent.width == 1 && parentRect->extent.height == 1 &&
+              xcb::isOverrideRedirect(connection, *parent) &&
+              !xcb::hasProperty(connection, *parent, XCB_ATOM_WM_CLASS)) {
+#if GAMESCOPE_WSI_BYPASS_DEBUG
+            fprintf(stderr, "[Gamescope WSI] Not bypassing: window 0x%x is parked under Wine dummy parent 0x%x.\n", window, *parent);
+#endif
+            return false;
+          }
+        }
+      }
+
+      auto largestObscuringWindowSize = xcb::getLargestObscuringChildWindowSize(connection, window);
+      auto toplevelWindow = xcb::getToplevelWindow(connection, window);
+      if (!largestObscuringWindowSize || !toplevelWindow) {
+        fprintf(stderr, "[Gamescope WSI] canBypassXWayland: failed to get window info for window 0x%x.\n", window);
+        return false;
+      }
 
       auto toplevelRect = xcb::getWindowRect(connection, *toplevelWindow);
       if (!toplevelRect) {
@@ -470,7 +503,11 @@ namespace GamescopeWSILayer {
       //
       // Some games like Halo Infinite, make a child window that is 1280x802px
       // I have no idea how that happens, or whether its an app or Wine bug or not.
-      if (*toplevelWindow != window) {
+      //
+      // Ignore a 1x1 toplevel: winex11 represents an empty window rect as
+      // a 1x1 X window, so it's not a real size to validate against.
+      if (*toplevelWindow != window &&
+          (toplevelRect->extent.width > 1 || toplevelRect->extent.height > 1)) {
         if (iabs(rect->offset.x) > 1 ||
             iabs(rect->offset.y) > 1 ||
             iabs(int32_t(toplevelRect->extent.width)  - int32_t(rect->extent.width)) > 2 ||
@@ -504,6 +541,7 @@ namespace GamescopeWSILayer {
     VkPresentModeKHR presentMode;
     VkExtent2D extent;
     uint32_t serverId = 0;
+    bool isHdrColorspace = false;
     bool retired = false;
 
     std::unique_ptr<std::mutex> presentTimingMutex = std::make_unique<std::mutex>();
@@ -789,7 +827,10 @@ namespace GamescopeWSILayer {
       const bool canBypass = gamescopeSurface->canBypassXWayland();
       VkSurfaceKHR selectedSurface = canBypass ? surface : gamescopeSurface->fallbackSurface;
 
-      if (!canBypass || !gamescopeSurface->shouldExposeHDR())
+      // HDR skips the Wine offscreen gate, so expose HDR formats whenever
+      // an HDR colorspace could bypass, even if SDR currently can't.
+      if (!gamescopeSurface->shouldExposeHDR() ||
+          !(canBypass || gamescopeSurface->canBypassXWayland(true)))
         return pDispatch->GetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, selectedSurface, pSurfaceFormatCount, pSurfaceFormats);
 
       return vkroots::helpers::append(
@@ -815,7 +856,10 @@ namespace GamescopeWSILayer {
       const bool canBypass = gamescopeSurface->canBypassXWayland();
       surfaceInfo.surface = canBypass ? surfaceInfo.surface : gamescopeSurface->fallbackSurface;
 
-      if (!canBypass || !gamescopeSurface->shouldExposeHDR())
+      // HDR skips the Wine offscreen gate, so expose HDR formats whenever
+      // an HDR colorspace could bypass, even if SDR currently can't.
+      if (!gamescopeSurface->shouldExposeHDR() ||
+          !(canBypass || gamescopeSurface->canBypassXWayland(true)))
         return pDispatch->GetPhysicalDeviceSurfaceFormats2KHR(physicalDevice, &surfaceInfo, pSurfaceFormatCount, pSurfaceFormats);
 
       return vkroots::helpers::append(
@@ -1111,7 +1155,11 @@ namespace GamescopeWSILayer {
         return pDispatch->CreateSwapchainKHR(device, pCreateInfo, pAllocator, pSwapchain);
       }
 
-      const bool canBypass = gamescopeSurface->canBypassXWayland();
+      // Only the colorspaces we expose in s_ExtraHDRSurfaceFormat2s count as
+      // HDR. Other non-sRGB colorspaces are still SDR content Wine can blit.
+      const bool hdrColorspace = pCreateInfo->imageColorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT ||
+                                  pCreateInfo->imageColorSpace == VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT;
+      const bool canBypass = gamescopeSurface->canBypassXWayland(hdrColorspace);
 
       VkSwapchainCreateInfoKHR swapchainInfo = *pCreateInfo;
 
@@ -1236,6 +1284,7 @@ namespace GamescopeWSILayer {
           .presentMode         = pCreateInfo->presentMode, // The new present mode.
           .extent              = pCreateInfo->imageExtent,
           .serverId            = serverId,
+          .isHdrColorspace     = hdrColorspace,
         });
         gamescopeSwapchain->pastPresentTimings.reserve(MaxPastPresentationTimes);
 
@@ -1296,6 +1345,53 @@ namespace GamescopeWSILayer {
       return pDispatch->AcquireNextImage2KHR(device, pAcquireInfo, pImageIndex);
     }
 
+    // A present that fails with VK_ERROR_OUT_OF_DATE_KHR must still perform
+    // its queue operations. We never forward a retired swapchain's present to
+    // the driver, so wait the semaphores and signal any
+    // VkSwapchainPresentFenceInfoEXT fences ourselves with an empty submit.
+    static VkResult PresentRetiredSwapchain(
+      const vkroots::VkDeviceDispatch* pDispatch,
+            VkQueue                    queue,
+      const VkPresentInfoKHR*          pPresentInfo) {
+      std::vector<VkPipelineStageFlags> waitStages(pPresentInfo->waitSemaphoreCount, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+
+      std::vector<VkFence> presentFences;
+      if (auto pFenceInfo = vkroots::FindInChain<const VkSwapchainPresentFenceInfoEXT>(pPresentInfo)) {
+        for (uint32_t i = 0; i < pFenceInfo->swapchainCount; i++) {
+          if (pFenceInfo->pFences[i] != VK_NULL_HANDLE)
+            presentFences.push_back(pFenceInfo->pFences[i]);
+        }
+      }
+
+      if (pPresentInfo->waitSemaphoreCount || !presentFences.empty()) {
+        VkSubmitInfo submitInfo = {
+          .sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+          .waitSemaphoreCount = pPresentInfo->waitSemaphoreCount,
+          .pWaitSemaphores    = pPresentInfo->pWaitSemaphores,
+          .pWaitDstStageMask  = waitStages.data(),
+        };
+
+        VkResult result = pDispatch->QueueSubmit(queue, 1, &submitInfo, presentFences.empty() ? VK_NULL_HANDLE : presentFences[0]);
+
+        // Fence signals are ordered after everything earlier in submission
+        // order, so any extra fences can ride empty submits.
+        for (size_t i = 1; i < presentFences.size() && result == VK_SUCCESS; i++) {
+          VkSubmitInfo emptySubmitInfo = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO };
+          result = pDispatch->QueueSubmit(queue, 1, &emptySubmitInfo, presentFences[i]);
+        }
+
+        if (result < VK_SUCCESS)
+          return result;
+      }
+
+      if (pPresentInfo->pResults) {
+        for (uint32_t i = 0; i < pPresentInfo->swapchainCount; i++)
+          pPresentInfo->pResults[i] = VK_ERROR_OUT_OF_DATE_KHR;
+      }
+
+      return VK_ERROR_OUT_OF_DATE_KHR;
+    }
+
     static VkResult QueuePresentKHR(
       const vkroots::VkDeviceDispatch* pDispatch,
             VkQueue                    queue,
@@ -1310,7 +1406,7 @@ namespace GamescopeWSILayer {
       for (uint32_t i = 0; i < presentInfo.swapchainCount; i++) {
         if (auto gamescopeSwapchain = GamescopeSwapchain::get(presentInfo.pSwapchains[i])) {
           if (gamescopeSwapchain->retired) {
-            return VK_ERROR_OUT_OF_DATE_KHR;
+            return PresentRetiredSwapchain(pDispatch, queue, pPresentInfo);
           }
 
           if (pPresentTimes && pPresentTimes->pTimes) {
@@ -1426,7 +1522,7 @@ namespace GamescopeWSILayer {
             continue;
           }
 
-          const bool canBypass = gamescopeSurface->canBypassXWayland();
+          const bool canBypass = gamescopeSurface->canBypassXWayland(gamescopeSwapchain->isHdrColorspace);
           if (canBypass != gamescopeSwapchain->isBypassingXWayland) {
             if (canBypass) {
               if (!(gamescopeSurface->flags & GamescopeLayerClient::Flag::NoSuboptimal))

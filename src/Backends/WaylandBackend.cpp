@@ -147,10 +147,16 @@ namespace gamescope
         uint32_t uFractionalScale;
     };
 
-    inline WaylandPlaneState ClipPlane( const WaylandPlaneState &state )
+    inline std::optional<WaylandPlaneState> ClipPlane( const WaylandPlaneState &state )
     {
         int32_t nClippedDstWidth  = std::min<int32_t>( g_nOutputWidth,  state.nDstWidth  + state.nDestX ) - state.nDestX;
         int32_t nClippedDstHeight = std::min<int32_t>( g_nOutputHeight, state.nDstHeight + state.nDestY ) - state.nDestY;
+
+        // A plane that starts past the edge of the output clips away to nothing.
+        // Viewport source and destination sizes must be positive, so present no buffer at all.
+        if ( nClippedDstWidth <= 0 || nClippedDstHeight <= 0 )
+            return std::nullopt;
+
         double flClippedSrcWidth  = state.flSrcWidth  * ( nClippedDstWidth  / double( state.nDstWidth ) );
         double flClippedSrcHeight = state.flSrcHeight * ( nClippedDstHeight / double( state.nDstHeight ) );
 
@@ -179,7 +185,10 @@ namespace gamescope
         {
             void *pMappedData = mmap( nullptr, uSize, PROT_READ | PROT_WRITE, MAP_SHARED, nFd, 0 );
             if ( pMappedData == MAP_FAILED )
+            {
+                close( nFd );
                 return -1;
+            }
             defer( munmap( pMappedData, uSize ) );
 
             memcpy( pMappedData, pData, uSize );
@@ -1083,7 +1092,10 @@ namespace gamescope
                 bool bNeedsBacking = true;
                 if ( pFrameInfo->layerCount >= 1 )
                 {
-                    if ( pFrameInfo->layers[0].isScreenSize() && !pFrameInfo->layers[0].hasAlpha() )
+                    if ( pFrameInfo->layers[0].isScreenSize() &&
+                         close_enough( pFrameInfo->layers[0].offset.x, 0.0f ) &&
+                         close_enough( pFrameInfo->layers[0].offset.y, 0.0f ) &&
+                         !pFrameInfo->layers[0].hasAlpha() )
                         bNeedsBacking = false;
                 }
 
@@ -2045,8 +2057,6 @@ namespace gamescope
                     return false;
 
                 // Transfer Functions
-                if ( !Algorithm::Contains( m_WPColorManagerFeatures.eTransferFunctions, WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_SRGB ) )
-                    return false;
                 if ( !Algorithm::Contains( m_WPColorManagerFeatures.eTransferFunctions, WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_ST2084_PQ ) )
                     return false;
 
@@ -2831,6 +2841,25 @@ namespace gamescope
         return true;
     }
 
+    // The display connection is dead by the time we get here, so say why before we take the process with us.
+    static void LogDisplayError( const char *pszWhat, wl_display *pDisplay )
+    {
+        int nError = wl_display_get_error( pDisplay );
+
+        if ( nError == EPROTO )
+        {
+            const wl_interface *pInterface = nullptr;
+            uint32_t uId = 0;
+            uint32_t uCode = wl_display_get_protocol_error( pDisplay, &pInterface, &uId );
+
+            xdg_log.errorf( "%s: protocol error %u on %s@%u", pszWhat, uCode, pInterface ? pInterface->name : "<unknown>", uId );
+        }
+        else
+        {
+            xdg_log.errorf( "%s: %s", pszWhat, strerror( nError ) );
+        }
+    }
+
     void CWaylandInputThread::ThreadFunc()
     {
         m_bInitted.wait( false );
@@ -2841,6 +2870,7 @@ namespace gamescope
         int nFD = wl_display_get_fd( m_pBackend->GetDisplay() );
         if ( nFD < 0 )
         {
+            xdg_log.errorf( "Couldn't get Wayland display fd for input thread." );
             abort();
         }
 
@@ -2852,6 +2882,7 @@ namespace gamescope
         {
             if ( ( nRet = wl_display_dispatch_queue_pending( m_pBackend->GetDisplay(), m_pQueue ) ) < 0 )
             {
+                LogDisplayError( "Failed to dispatch input thread queue", m_pBackend->GetDisplay() );
                 abort();
             }
 
@@ -2860,6 +2891,7 @@ namespace gamescope
                 if ( errno == EAGAIN || errno == EINTR )
                     continue;
 
+                LogDisplayError( "Failed to prepare read of input thread queue", m_pBackend->GetDisplay() );
                 abort();
             }
 
@@ -2867,7 +2899,10 @@ namespace gamescope
             {
                 wl_display_cancel_read( m_pBackend->GetDisplay() );
                 if ( nRet < 0 )
+                {
+                    xdg_log.errorf_errno( "Input thread poll failed" );
                     abort();
+                }
 
                 assert( nRet == 0 );
                 continue;
@@ -2875,6 +2910,7 @@ namespace gamescope
 
             if ( ( nRet = wl_display_read_events( m_pBackend->GetDisplay() ) ) < 0 )
             {
+                LogDisplayError( "Failed to read events on input thread", m_pBackend->GetDisplay() );
                 abort();
             }
         }

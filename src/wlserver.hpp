@@ -13,6 +13,8 @@
 #include <unordered_map>
 #include <optional>
 
+#include <xkbcommon/xkbcommon.h>
+
 #include "WaylandServer/WaylandDecls.h"
 #include "WaylandServer/WaylandServerLegacy.h"
 
@@ -79,6 +81,7 @@ public:
 	void handle_override_window_content( struct wl_client *client, struct wl_resource *gamescope_swapchain_resource, struct wlr_surface *surface, uint32_t x11_window );
 	void destroy_content_override( struct wlserver_x11_surface_info *x11_surface, struct wlr_surface *surf);
 	void destroy_content_override(struct wlserver_content_override *co);
+	void clear_content_override_swapchain( struct wl_resource *gamescope_swapchain_resource );
 
 	struct wl_client *get_client();
 	struct wlr_output *get_output();
@@ -125,6 +128,7 @@ struct wlserver_t {
 		struct wlr_keyboard *virtual_keyboard_device;
 
 		struct wlr_device *device;
+		struct wl_listener device_change_listener = {};
 
 		std::vector<std::unique_ptr<gamescope_xwayland_server_t>> xwayland_servers;
 	} wlr;
@@ -197,6 +201,9 @@ struct wlserver_t {
     struct wlr_keyboard_group *keyboard_group;
     struct wl_listener keyboard_group_modifiers;
     struct wl_listener keyboard_group_key;
+
+    // Sym each held key resolved to at press time, keyed by device and keycode.
+    std::map<std::pair<struct wlr_keyboard *, xkb_keycode_t>, xkb_keysym_t> mapPressedHotkeyKeys;
 };
 
 extern struct wlserver_t wlserver;
@@ -210,6 +217,7 @@ struct wlserver_pointer {
 	struct wl_listener button;
 	struct wl_listener axis;
 	struct wl_listener frame;
+	struct wl_listener destroy;
 };
 
 struct wlserver_touch {
@@ -218,6 +226,7 @@ struct wlserver_touch {
 	struct wl_listener down;
 	struct wl_listener up;
 	struct wl_listener motion;
+	struct wl_listener destroy;
 
     gamescope::IBackendConnector* connector;
 };

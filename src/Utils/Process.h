@@ -31,6 +31,16 @@ namespace gamescope::Process
 
     void CloseAllFds( std::span<int> nExcludedFds );
 
+    void RemoveSteamOverlayFromPreload();
+
+    // Stashes the LD_PRELOAD we were launched with so a child that can draw the overlay
+    // gets handed it instead. Does nothing if we have no overlay or have already done this.
+    void RestartWithoutSteamOverlay( char **argv );
+
+    // Puts a stashed Steam overlay back into LD_PRELOAD for our children to inherit.
+    // Returns whether there was anything stashed to put back.
+    bool RestoreSteamOverlayPreload();
+
     pid_t SpawnProcess( char **argv, std::function<void()> fnPreambleInChild = nullptr, bool bDoubleFork = false );
     pid_t SpawnProcessInWatchdog( char **argv, bool bRespawn = false, std::function<void()> fnPreambleInChild = nullptr );
 
