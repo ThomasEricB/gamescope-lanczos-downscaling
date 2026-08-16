@@ -44,30 +44,45 @@ under COSMIC (Wayland).
    the AMD plane props are absent, and that HDR output is correct — rather than
    silently producing a wrong/clipped image.
 
-## Known crash: SPIR-V compiler SEGV on driver 610 (Blackwell)
+## Fixed: SIGSEGV on shutdown, misread as a SPIR-V compiler bug
 
-On driver 610.43.02 (RTX 5090), gamescope reproducibly **SIGSEGVs while compiling
-its composite/upscale shaders**, inside the NVIDIA SPIR-V→NVVM compiler. It dies
-right after backend init / EDID patch, before the first swapchain; nested clients
-then report `failed to read Wayland events: Broken pipe`.
-
-Backtrace (coredumpctl):
+On driver 610 (tested 610.57.04, RTX 5090), gamescope SIGSEGVs whenever the
+primary child exits early -- e.g. `gamescope -- vkcube`, where the client dies
+with `Failed to get Wayland objects`. The backtrace lands inside NVIDIA's
+shader compiler:
 
 ```
-Signal: 11 (SEGV)
-#0  libnvidia-glvkspirv.so.610.43.02 + 0x9dd20
+#22 libnvidia-glvkspirv.so.610.57.04 + 0xa21db
+#23 _nv002nvvm (libnvidia-glvkspirv.so.610.57.04 + 0xa2a06)
 ...
-#10 _nv002nvvm (libnvidia-glvkspirv.so.610.43.02 + 0xa2816)
-#11 libnvidia-eglcore.so.610.43.02 + 0xd3061d
+#32 CVulkanDevice::compilePipeline(...)
+#33 CVulkanDevice::compileAllPipelines(std::stop_token)
 ```
 
-Notes:
-- Not the shader disk cache — purging `~/.cache/nvidia` and setting
-  `__GL_SHADER_DISK_CACHE=0` does not help.
-- Affects both nested and standalone (`--backend drm`) paths — same compile step.
-- Next: bisect which composite/upscale shader trips the compiler, capture a
-  minimal repro, file with NVIDIA, and add a gamescope-side fallback so startup
-  degrades instead of crashing.
+This reads like a driver bug in the SPIR-V->NVVM compiler, but it is not.
+It is a lifetime bug in gamescope: the pre-compile thread from
+`CVulkanDevice::BInit()` is never stopped or joined during shutdown, so the
+process tears down while that thread is still executing inside
+`libnvidia-gpucomp`.
+
+Evidence it is not a bad shader:
+
+- Given a long-lived child (`gamescope -- sleep 30`), **all 110 pre-compiled
+  pipelines compile successfully** and gamescope exits 0. That includes this
+  fork's `EWA_LANCZOS`, `BILATERAL_DENOISER` and `HDEBAND`.
+- Individual compiles are fast (0.1-0.4 ms typical, ~130 ms worst case).
+- The crash point moves between runs, which a malformed shader would not do.
+
+Fixed by joining the pre-compile thread before teardown. Measured with the
+shader cache purged and `__GL_SHADER_DISK_CACHE=0`: 9/10 runs SIGSEGV before,
+0/10 after.
+
+### Note on the shader disk cache
+
+A *warm* NVIDIA shader cache hides this bug completely (0/10 crashes), because
+cached pipelines never re-enter the compiler. Purging `~/.cache/nvidia` or
+setting `__GL_SHADER_DISK_CACHE=0` is therefore required to reproduce it, and
+any measurement taken without doing so is meaningless.
 
 ## Testing
 
