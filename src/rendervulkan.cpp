@@ -1489,6 +1489,8 @@ std::shared_ptr<VulkanTimelineSemaphore_t> CVulkanDevice::ImportTimelineSemaphor
 	//
 	// Thus, we must dup.
 
+	const int nDupedSyncobjFd = dup( pTimeline->GetSyncobjFd() );
+
 	VkImportSemaphoreFdInfoKHR importFdInfo =
 	{
 		.sType = VK_STRUCTURE_TYPE_IMPORT_SEMAPHORE_FD_INFO_KHR,
@@ -1496,11 +1498,15 @@ std::shared_ptr<VulkanTimelineSemaphore_t> CVulkanDevice::ImportTimelineSemaphor
 		.semaphore = pSemaphore->pVkSemaphore,
 		.flags = 0, // not temporary
 		.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT,
-		.fd = dup( pTimeline->GetSyncobjFd() ),
+		.fd = nDupedSyncobjFd,
 	};
 	if ( ( res = vk.ImportSemaphoreFdKHR( m_device, &importFdInfo ) ) != VK_SUCCESS )
 	{
 		vk_errorf( res, "vkImportSemaphoreFdKHR failed" );
+		// Ownership of the fd only transfers to the driver on success,
+		// so we still own it here and must not leak it.
+		if ( nDupedSyncobjFd >= 0 )
+			close( nDupedSyncobjFd );
 		return nullptr;
 	}
 
