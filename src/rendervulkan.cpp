@@ -1248,6 +1248,12 @@ void CVulkanDevice::compileAllPipelines(std::stop_token st)
 					if (blur_layers > layerCount)
 						continue;
 
+					// Bail out before starting another compile rather than only
+					// after finishing one. Shutdown must not be left waiting on
+					// the remainder of the pre-compile matrix.
+					if (st.stop_requested())
+						return;
+
 					VkPipeline newPipeline = compilePipeline(layerCount, ycbcrMask, info.shaderType, blur_layers, info.compositeDebug, info.colorspaceMask, info.outputEOTF, info.itmEnable);
 					{
 						std::lock_guard<std::mutex> lock(m_pipelineMutex);
@@ -4741,6 +4747,20 @@ void vulkan_wait( uint64_t ulSeqNo, bool bReset )
 bool vulkan_is_nvidia( void )
 {
 	return g_device.isNvidia();
+}
+
+void CVulkanDevice::StopPipelineCompilation()
+{
+	if ( m_pipelineThread.joinable() )
+	{
+		m_pipelineThread.request_stop();
+		m_pipelineThread.join();
+	}
+}
+
+void vulkan_stop_pipeline_compilation( void )
+{
+	g_device.StopPipelineCompilation();
 }
 
 bool vulkan_has_drm_props()

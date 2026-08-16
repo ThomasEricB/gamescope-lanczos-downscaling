@@ -1150,5 +1150,12 @@ static void steamCompMgrThreadRun(int argc, char **argv)
 
 	steamcompmgr_main( argc, argv );
 
+	// Stop and join the pipeline pre-compile thread before we start tearing the
+	// process down. It runs inside the Vulkan driver's shader compiler, and on
+	// the NVIDIA proprietary driver being torn down underneath mid-compile
+	// faults inside libnvidia-gpucomp. Reproducible whenever the primary child
+	// exits early, e.g. if the client fails to initialise.
+	vulkan_stop_pipeline_compilation();
+
 	pthread_kill( g_mainThread, SIGINT );
 }
