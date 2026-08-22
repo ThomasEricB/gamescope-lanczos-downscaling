@@ -1602,7 +1602,7 @@ namespace gamescope
         bool bNeedsFullComposite = false;
 
         // TODO: Dedupe some of this composite check code between us and drm.cpp
-        bool bLayer0ScreenSize = close_enough(pFrameInfo->layers[0].scale.x, 1.0f) && close_enough(pFrameInfo->layers[0].scale.y, 1.0f);
+        bool bLayer0ScreenSize = close_enough(pFrameInfo->layers.get( 0 ).scale.x, 1.0f) && close_enough(pFrameInfo->layers.get( 0 ).scale.y, 1.0f);
 
         bool bNeedsCompositeFromFilter = (g_upscaleFilter == GamescopeUpscaleFilter::NEAREST || g_upscaleFilter == GamescopeUpscaleFilter::PIXEL) && !bLayer0ScreenSize;
 
@@ -1621,7 +1621,7 @@ namespace gamescope
             bNeedsFullComposite |= g_bHDRItmEnable;
 
         if ( !m_pBackend->SupportsColorManagement() )
-            bNeedsFullComposite |= ColorspaceIsHDR( pFrameInfo->layers[0].colorspace );
+            bNeedsFullComposite |= ColorspaceIsHDR( pFrameInfo->layers.get( 0 ).colorspace );
 
         bNeedsFullComposite |= !!(g_uCompositeDebug & CompositeDebugFlag::Heatmap);
 
@@ -1633,9 +1633,9 @@ namespace gamescope
         if ( !bNeedsFullComposite )
         {
             bool bNeedsBacking = true;
-            if ( pFrameInfo->layerCount >= 1 )
+            if ( pFrameInfo->layers.count() >= 1 )
             {
-                if ( pFrameInfo->layers[0].isScreenSize() && ( !pFrameInfo->layers[0].hasAlpha() || cv_vr_transparent_backing ) )
+                if ( pFrameInfo->layers.get( 0 ).isScreenSize() && ( !pFrameInfo->layers.get( 0 ).hasAlpha() || cv_vr_transparent_backing ) )
                     bNeedsBacking = false;
             }
 
@@ -1661,7 +1661,7 @@ namespace gamescope
 
             for ( int i = 0; i < 8 && uCurrentPlane < 8; i++ )
             {
-                const FrameInfo_t::Layer_t *pLayer = i < pFrameInfo->layerCount ? &pFrameInfo->layers[i] : nullptr;
+                const FrameInfo_t::Layer_t *pLayer = i < pFrameInfo->layers.count() ? &pFrameInfo->layers.get( i ) : nullptr;
                 if ( pLayer && pLayer->zpos == g_zposCursor )
                 {
                     bool bUsingPhysicalMouse = m_pBackend->GetCurrentMouseConnector() == this && !m_bUsingVRMouse;
@@ -1822,14 +1822,20 @@ namespace gamescope
         if ( g_bForceRelativeMouse )
             this->SetRelativeMouseMode( true );
         
-        if ( m_pBackend->m_oulCurrentSceneVirtualConnectorKey &&
-             GetVirtualConnectorKey() == *m_pBackend->m_oulCurrentSceneVirtualConnectorKey )
         {
-            MarkSceneAppShown( true );
-        }
+            // UpdateVisibility reads the focus connectors' planes, which the
+            // lock keeps alive against a concurrent connector destruction.
+            std::scoped_lock lock{ m_pBackend->m_mutActiveConnectors };
 
-        // Set the initial overlay visibility
-        MarkOverlayShown( vr::VROverlay()->IsOverlayVisible( GetPrimaryPlane()->GetOverlay() ) );
+            if ( m_pBackend->m_oulCurrentSceneVirtualConnectorKey &&
+                 GetVirtualConnectorKey() == *m_pBackend->m_oulCurrentSceneVirtualConnectorKey )
+            {
+                MarkSceneAppShown( true );
+            }
+
+            // Set the initial overlay visibility
+            MarkOverlayShown( vr::VROverlay()->IsOverlayVisible( GetPrimaryPlane()->GetOverlay() ) );
+        }
 
         return true;
     }
@@ -1854,6 +1860,37 @@ namespace gamescope
                 nNewOverlayVisibleCount,
                 m_bOverlayShown    ? "true" : "false",
                 m_bSceneAppVisible ? "true" : "false" );
+
+            // SteamVR can fail to grant a launching app overlay input focus,
+            // which would otherwise leave the previous connector current. Only
+            // defer to a holder SteamVR's grant actually points at. Every
+            // caller holds m_mutActiveConnectors, which keeps the holder alive
+            // across the plane lookup.
+            if ( bVisible )
+            {
+                COpenVRConnector *pKeyboardConnector = m_pBackend->m_pKeyboardFocusConnector.load();
+                COpenVRConnector *pMouseConnector = m_pBackend->m_pMouseFocusConnector.load();
+
+                bool bTakeKeyboard = !pKeyboardConnector || pKeyboardConnector == this ||
+                    !pKeyboardConnector->GetPlaneByOverlayHandle( g_FocusedVROverlayKeyboard.load() );
+                bool bTakeMouse = !pMouseConnector || pMouseConnector == this ||
+                    !pMouseConnector->GetPlaneByOverlayHandle( g_FocusedVROverlayMouse.load() );
+
+                bool bChanged = false;
+                if ( bTakeKeyboard )
+                    bChanged |= m_pBackend->m_pKeyboardFocusConnector.exchange( this ) != this;
+                if ( bTakeMouse )
+                    bChanged |= m_pBackend->m_pMouseFocusConnector.exchange( this ) != this;
+
+                if ( bChanged )
+                {
+                    openvr_log.debugf( "Changing keyboard and mouse focus connector to %p", this );
+                    update_connector_display_info_wl( NULL );
+
+                    MakeFocusDirty();
+                    nudge_steamcompmgr();
+                }
+            }
         }
     }
 

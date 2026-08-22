@@ -114,6 +114,7 @@ struct steamcompmgr_win_t {
 	bool isSteamStreamingClientVideo = false;
 	uint32_t inputFocusMode = 0;
 	uint32_t appID = 0;
+	uint32_t steamAppID = 0;
 	bool isOverlay = false;
 	bool isExternalOverlay = false;
 
@@ -150,7 +151,6 @@ struct steamcompmgr_win_t {
 
 	bool bHasHadNonSRGBColorSpace = false;
 
-	bool nudged = false;
 	bool placed = false;
 	bool ignoreOverrideRedirect = false;
 
