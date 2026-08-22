@@ -462,7 +462,7 @@ gamescope::OwningRc<CVulkanTexture> vulkan_create_texture_from_bits( uint32_t wi
 gamescope::OwningRc<CVulkanTexture> vulkan_create_texture_from_wlr_buffer( struct wlr_buffer *buf, gamescope::OwningRc<gamescope::IBackendFb> pBackendFb );
 
 std::optional<uint64_t> vulkan_composite( struct FrameInfo_t *frameInfo, gamescope::Rc<CVulkanTexture> pScreenshotTexture, bool partial, gamescope::Rc<CVulkanTexture> pOutputOverride = nullptr, bool increment = true, std::unique_ptr<CVulkanCmdBuffer> pInCommandBuffer = nullptr );
-void vulkan_wait( uint64_t ulSeqNo, bool bReset );
+bool vulkan_wait( uint64_t ulSeqNo, bool bReset );
 bool vulkan_is_nvidia( void );
 void vulkan_stop_pipeline_compilation( void );
 gamescope::Rc<CVulkanTexture> vulkan_get_last_output_image( bool partial, bool defer );
@@ -768,6 +768,7 @@ static inline uint32_t div_roundup(uint32_t x, uint32_t y)
 	VK_FUNC(GetSemaphoreFdKHR) \
 	VK_FUNC(ImportSemaphoreFdKHR) \
 	VK_FUNC(CreateShaderModule) \
+	VK_FUNC(DeviceWaitIdle) \
 	VK_FUNC(CreateSwapchainKHR) \
 	VK_FUNC(DestroyBuffer) \
 	VK_FUNC(DestroyDescriptorPool) \
@@ -838,9 +839,9 @@ public:
 	std::unique_ptr<CVulkanCmdBuffer> commandBuffer();
 	uint64_t submit( std::unique_ptr<CVulkanCmdBuffer> cmdBuf);
 	uint64_t submitInternal( CVulkanCmdBuffer* cmdBuf );
-	void wait(uint64_t sequence, bool reset = true);
+	bool wait(uint64_t sequence, bool reset = true);
 	void StopPipelineCompilation();
-	void waitIdle(bool reset = true);
+	bool waitIdle(bool reset = true);
 	void garbageCollect();
 	inline VkDescriptorSet descriptorSet()
 	{
@@ -882,7 +883,8 @@ public:
 		if (m_uploadBufferOffset + size > upload_buffer_size)
 		{
 			fprintf(stderr, "Exceeded uploadBufferData\n");
-			waitIdle(false);
+			if ( !waitIdle(false) )
+				vk.DeviceWaitIdle(device());
 		}
 
 		uint32_t uOffset = m_uploadBufferOffset;

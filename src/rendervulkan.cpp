@@ -125,6 +125,7 @@ VulkanOutput_t g_output;
 
 uint32_t g_uCompositeDebug = 0u;
 gamescope::ConVar<uint32_t> cv_composite_debug{ "composite_debug", 0, "Debug composition flags" };
+gamescope::ConVar<uint32_t> cv_vulkan_wait_timeout_ms{ "vulkan_wait_timeout_ms", 15000, "Timeout for vulkan_wait/CVulkanDevice::wait in milliseconds. Set to 0 for infinite wait." };
 
 static std::map< VkFormat, std::map< uint64_t, VkDrmFormatModifierPropertiesEXT > > DRMModifierProps = {};
 static std::unordered_map<uint32_t, std::vector<uint64_t>> s_SampledModifierFormats = {};
@@ -1547,7 +1548,7 @@ void CVulkanCmdBuffer::AddSignal( std::shared_ptr<VulkanTimelineSemaphore_t> pTi
 	m_ExternalSignals.emplace_back( std::move( pTimelineSemaphore ), ulPoint );
 }
 
-void CVulkanDevice::wait(uint64_t sequence, bool reset)
+bool CVulkanDevice::wait(uint64_t sequence, bool reset)
 {
 	if (m_submissionSeqNo == sequence)
 		m_uploadBufferOffset = 0;
@@ -1559,15 +1560,30 @@ void CVulkanDevice::wait(uint64_t sequence, bool reset)
 		.pValues = &sequence,
 	} ;
 
-	vk_check( vk.WaitSemaphores( device(), &waitInfo, ~0ull ) );
+	const uint64_t ulTimeoutNs = cv_vulkan_wait_timeout_ms == 0u
+		? ~0ull
+		: uint64_t( cv_vulkan_wait_timeout_ms ) * 1000000ull;
+	VkResult res = vk.WaitSemaphores( device(), &waitInfo, ulTimeoutNs );
+	if ( res == VK_TIMEOUT )
+	{
+		vk_log.errorf( "Timed out waiting for Vulkan sequence %llu after %u ms",
+			(unsigned long long)sequence, (uint32_t)cv_vulkan_wait_timeout_ms );
+		return false;
+	}
+	if ( res != VK_SUCCESS )
+	{
+		vk_errorf( res, "vkWaitSemaphores failed while waiting for sequence %llu", (unsigned long long)sequence );
+		return false;
+	}
 
 	if (reset)
 		resetCmdBuffers(sequence);
+	return true;
 }
 
-void CVulkanDevice::waitIdle(bool reset)
+bool CVulkanDevice::waitIdle(bool reset)
 {
-	wait(m_submissionSeqNo, reset);
+	return wait(m_submissionSeqNo, reset);
 }
 
 void CVulkanDevice::resetCmdBuffers(uint64_t sequence)
@@ -3307,7 +3323,11 @@ void vulkan_update_luts(const gamescope::Rc<CVulkanTexture>& lut1d, const gamesc
 	cmdBuffer->copyBufferToImage(g_device.uploadBuffer(), base_offset, 0, lut1d);
 	cmdBuffer->copyBufferToImage(g_device.uploadBuffer(), base_offset + lut1d_size, 0, lut3d);
 	g_device.submit(std::move(cmdBuffer));
-	g_device.waitIdle(); // TODO: Sync this better
+	if ( !g_device.waitIdle() )
+	{
+		vk_log.errorf( "vulkan_update_luts: waitIdle failed; draining device" );
+		g_device.vk.DeviceWaitIdle( g_device.device() );
+	} // TODO: Sync this better
 }
 
 gamescope::Rc<CVulkanTexture> vulkan_get_hacky_blank_texture()
@@ -3339,7 +3359,11 @@ gamescope::OwningRc<CVulkanTexture> vulkan_create_flat_texture( uint32_t width, 
 	auto cmdBuffer = g_device.commandBuffer();
 	cmdBuffer->copyBufferToImage(g_device.uploadBuffer(), offset, 0, texture.get());
 	g_device.submit(std::move(cmdBuffer));
-	g_device.waitIdle();
+	if ( !g_device.waitIdle() )
+	{
+		vk_log.errorf( "vulkan_create_flat_texture: waitIdle failed; draining device" );
+		g_device.vk.DeviceWaitIdle( g_device.device() );
+	}
 
 	return texture;
 }
@@ -3480,7 +3504,11 @@ bool vulkan_remake_swapchain( void )
 	g_currentPresentWaitId.notify_all();
 
 	VulkanOutput_t *pOutput = &g_output;
-	g_device.waitIdle();
+	if ( !g_device.waitIdle() )
+	{
+		vk_log.errorf( "vulkan_remake_swapchain: waitIdle failed; draining device" );
+		g_device.vk.DeviceWaitIdle( g_device.device() );
+	}
 	g_device.vk.QueueWaitIdle( g_device.queue() );
 
 	pOutput->outputImages.clear();
@@ -3587,7 +3615,11 @@ static bool vulkan_make_output_images( VulkanOutput_t *pOutput )
 bool vulkan_remake_output_images()
 {
 	VulkanOutput_t *pOutput = &g_output;
-	g_device.waitIdle();
+	if ( !g_device.waitIdle() )
+	{
+		vk_log.errorf( "vulkan_remake_output_images: waitIdle failed; draining device" );
+		g_device.vk.DeviceWaitIdle( g_device.device() );
+	}
 
 	pOutput->nOutImage = 0;
 
@@ -3835,7 +3867,11 @@ gamescope::OwningRc<CVulkanTexture> vulkan_create_texture_from_bits( uint32_t wi
 	// TODO: Sync this copyBufferToImage.
 
 	g_device.submit(std::move(cmdBuffer));
-	g_device.waitIdle();
+	if ( !g_device.waitIdle() )
+	{
+		vk_log.errorf( "vulkan_create_texture_from_bits: waitIdle failed; draining device" );
+		g_device.vk.DeviceWaitIdle( g_device.device() );
+	}
 
 	return pTex;
 }
@@ -4327,7 +4363,8 @@ std::optional<uint64_t> vulkan_composite( struct FrameInfo_t *frameInfo, gamesco
 			if (pipeline != nullptr)
 			{
 				uint64_t seq = pipeline->execute(frameInfo->layers.get( 0 ).tex, &frameInfo->layers.get( 0 ).tex);
-				g_device.wait(seq);
+				if ( !g_device.wait(seq) )
+					vk_log.errorf( "reshade execute: wait failed for sequence %llu; output may be inconsistent", (unsigned long long)seq );
 			}
 		}
 	}
@@ -4482,7 +4519,8 @@ std::optional<uint64_t> vulkan_composite( struct FrameInfo_t *frameInfo, gamesco
 				lanczosCmdBuf->uploadConstants<LanczosPushData_t>(inputX, inputY, tempX, tempY);
 				lanczosCmdBuf->dispatch(div_roundup(tempX, lanczosGroup), div_roundup(tempY, lanczosGroup));
 				uint64_t seq = g_device.submit(std::move(lanczosCmdBuf));
-				g_device.wait(seq);
+				if ( !g_device.wait(seq) )
+					vk_log.errorf( "lanczos: wait failed for sequence %llu; output may be inconsistent", (unsigned long long)seq );
 			}
 
 			// Optional post-process passes (bilateral denoiser / hdeband)
@@ -4562,7 +4600,8 @@ std::optional<uint64_t> vulkan_composite( struct FrameInfo_t *frameInfo, gamesco
 					runPostPass( SHADER_TYPE_HDEBAND );
 
 				uint64_t seq = g_device.submit(std::move(postCmdBuf));
-				g_device.wait(seq);
+				if ( !g_device.wait(seq) )
+					vk_log.errorf( "lanczos post pass: wait failed for sequence %llu; output may be inconsistent", (unsigned long long)seq );
 			}
 
 			// Final BLIT composite in the main command buffer: sample the
@@ -4739,7 +4778,7 @@ after_composite:
 	return sequence;
 }
 
-void vulkan_wait( uint64_t ulSeqNo, bool bReset )
+bool vulkan_wait( uint64_t ulSeqNo, bool bReset )
 {
 	return g_device.wait( ulSeqNo, bReset );
 }
@@ -4997,7 +5036,11 @@ gamescope::OwningRc<CVulkanTexture> vulkan_create_texture_from_wlr_buffer( struc
 
 	uint64_t sequence = g_device.submit(std::move(cmdBuffer));
 
-	g_device.wait(sequence);
+	if ( !g_device.wait(sequence) )
+	{
+		vk_log.errorf( "vulkan_create_texture_from_wlr_buffer: wait failed for sequence %llu; draining device before freeing staging buffer", (unsigned long long)sequence );
+		g_device.vk.DeviceWaitIdle( g_device.device() );
+	}
 
 	g_device.vk.DestroyBuffer(g_device.device(), buffer, nullptr);
 	g_device.vk.FreeMemory(g_device.device(), bufferMemory, nullptr);
