@@ -1832,6 +1832,14 @@ namespace gamescope
     {
         wp_presentation_feedback_destroy( pFeedback );
 
+        // A discarded present still has to keep the vblank chain alive. Nothing
+        // else re-arms the timer on this path: MarkVBlank() only runs from
+        // Presented(), and the pre-emptive re-arm in steamcompmgr_main is gated
+        // on bIsVBlankFromTimer (== vblank), so once we stop vblanking it can
+        // never restart us. Re-arm pre-emptively so we survive a host that
+        // discards a present instead of showing it.
+        GetVBlankTimer().ArmNextVBlank( true );
+
         // Nudge so that steamcompmgr releases commits.
         nudge_steamcompmgr();
     }
