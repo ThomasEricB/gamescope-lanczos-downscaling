@@ -7990,7 +7990,17 @@ void update_wayland_res(CommitDoneList_t *doneCommits, steamcompmgr_win_t *w, Re
 			already_exists = true;
 	}
 
-	if ( already_exists && !reslistentry.feedback && reslistentry.presentation_feedbacks.empty() )
+	// An acquire point means the client is telling us new work is landing in this
+	// buffer, so a repeat of a buffer we already hold is not a redundant commit.
+	// This dedup predates explicit sync, when re-committing the same buffer could
+	// only mean nothing had changed. With explicit sync a client may keep reusing
+	// one buffer and signal a fresh acquire point per frame, because the fence
+	// provides the ordering that buffer rotation used to -- Xwayland relaying zink
+	// does exactly this. Dropping those commits loses every frame after the first:
+	// the queue always retains the last done commit, so every later commit of that
+	// same buffer matches, nothing sets hasRepaint, and we stop painting entirely
+	// while the client keeps submitting at full rate.
+	if ( already_exists && !reslistentry.pAcquirePoint && !reslistentry.feedback && reslistentry.presentation_feedbacks.empty() )
 	{
 		wlserver_lock();
 		wlr_buffer_unlock( buf );
