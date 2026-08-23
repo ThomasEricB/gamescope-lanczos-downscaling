@@ -1483,6 +1483,14 @@ namespace gamescope
             {
                 struct wp_presentation_feedback *pFeedback = wp_presentation_feedback( m_pBackend->GetPresentation(), m_pSurface );
                 wp_presentation_feedback_add_listener( pFeedback, &s_PresentationFeedbackListener, this );
+
+                // Instrumentation: the nested backends never populated these, so
+                // `gamescopectl backend_info` always reported zero. Count a present
+                // here and complete it in both feedback handlers, so in-flight tells
+                // us whether we have stopped committing or the host has stopped
+                // acking what we commit.
+                if ( m_pConnector )
+                    m_pConnector->PresentationFeedback().m_uQueuedPresents++;
             }
 
             if ( m_pWPColorManagedSurface )
@@ -1825,12 +1833,18 @@ namespace gamescope
         GetVBlankTimer().MarkVBlank( ulTime, true );
         wp_presentation_feedback_destroy( pFeedback );
 
+        if ( m_pConnector )
+            m_pConnector->PresentationFeedback().m_uCompletedPresents++;
+
         // Nudge so that steamcompmgr releases commits.
         nudge_steamcompmgr();
     }
     void CWaylandPlane::Wayland_PresentationFeedback_Discarded( struct wp_presentation_feedback *pFeedback )
     {
         wp_presentation_feedback_destroy( pFeedback );
+
+        if ( m_pConnector )
+            m_pConnector->PresentationFeedback().m_uCompletedPresents++;
 
         // A discarded present still has to keep the vblank chain alive. Nothing
         // else re-arms the timer on this path: MarkVBlank() only runs from
